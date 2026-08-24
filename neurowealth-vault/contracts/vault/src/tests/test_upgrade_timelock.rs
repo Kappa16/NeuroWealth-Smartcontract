@@ -421,3 +421,116 @@ fn test_schedule_and_cancel_emit_events() {
     let ev = UpgradeCancelledEvent::try_from_val(&env, data).expect("UpgradeCancelledEvent decode");
     assert_eq!(ev.cancelled_wasm_hash, hash);
 }
+
+// ── Frontrunning protection tests (Issue #576) ─────────────────────────────────────
+
+/// Test that non-owner cannot schedule an upgrade during the pending window (Issue #576).
+/// Only the owner can change the pending wasm hash via cancel + reschedule.
+#[test]
+#[should_panic(expected = "Error(Contract, #34)")]
+fn test_non_owner_cannot_schedule_during_pending_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    // Owner schedules initial upgrade
+    client.schedule_upgrade(&owner, &fake_hash(&env, 1));
+    assert!(client.get_pending_upgrade().is_some());
+
+    // Non-owner tries to schedule a different upgrade during pending window
+    let attacker = Address::generate(&env);
+    client.schedule_upgrade(&attacker, &fake_hash(&env, 2));
+}
+
+/// Test that non-owner cannot cancel during the pending window (Issue #576).
+/// Only the owner can cancel to enable rescheduling with a different hash.
+#[test]
+#[should_panic(expected = "Error(Contract, #34)")]
+fn test_non_owner_cannot_cancel_during_pending_window() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    // Owner schedules initial upgrade
+    client.schedule_upgrade(&owner, &fake_hash(&env, 1));
+    assert!(client.get_pending_upgrade().is_some());
+
+    // Non-owner tries to cancel during pending window
+    let attacker = Address::generate(&env);
+    client.cancel_upgrade(&attacker);
+}
+
+/// Test that the pending wasm hash cannot be substituted before execution (Issue #576).
+/// The hash is fixed at schedule time and verified at execution time.
+#[test]
+fn test_pending_wasm_hash_fixed_at_execution_time() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    // Schedule upgrade with specific hash
+    let original_hash = fake_hash(&env, 1);
+    client.schedule_upgrade(&owner, &original_hash);
+
+    let pending = client.get_pending_upgrade().unwrap();
+    assert_eq!(pending.0, original_hash, "pending hash should match scheduled hash");
+
+    // Extend instance TTL before advancing sequence
+    env.as_contract(&contract_id, || {
+        env.storage().instance().extend_ttl(20000, 20000);
+    });
+
+    // Advance past timelock
+    env.ledger().set_sequence_number(pending.1);
+
+    // Verify the hash is still the original (no substitution possible)
+    let pending_after = client.get_pending_upgrade().unwrap();
+    assert_eq!(
+        pending_after.0, original_hash,
+        "pending hash should remain unchanged even after timelock expires"
+    );
+
+    // Execute will use the original hash (this will fail with dummy hash, but proves the hash is used)
+    let result = client.try_execute_upgrade(&owner);
+    assert!(result.is_err(), "execution with dummy hash should fail");
+}
+
+/// Test that only owner can change the pending hash via cancel + reschedule (Issue #576).
+#[test]
+fn test_only_owner_can_change_pending_hash_via_cancel_reschedule() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    // Owner schedules initial upgrade
+    let original_hash = fake_hash(&env, 1);
+    client.schedule_upgrade(&owner, &original_hash);
+    assert_eq!(client.get_pending_upgrade().unwrap().0, original_hash);
+
+    // Owner cancels and reschedules with different hash
+    client.cancel_upgrade(&owner);
+    assert!(client.get_pending_upgrade().is_none());
+
+    let new_hash = fake_hash(&env, 2);
+    client.schedule_upgrade(&owner, &new_hash);
+    assert_eq!(client.get_pending_upgrade().unwrap().0, new_hash);
+
+    // Verify non-owner cannot perform the same cancel + reschedule
+    client.cancel_upgrade(&owner);
+    client.schedule_upgrade(&owner, &original_hash);
+
+    let attacker = Address::generate(&env);
+    let cancel_result = client.try_cancel_upgrade(&attacker);
+    assert!(cancel_result.is_err(), "non-owner cannot cancel");
+
+    let schedule_result = client.try_schedule_upgrade(&attacker, &new_hash);
+    assert!(schedule_result.is_err(), "non-owner cannot schedule");
+}

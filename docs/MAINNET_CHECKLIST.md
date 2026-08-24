@@ -214,6 +214,10 @@ The NeuroWealth AI agent deploys assets into DEX liquidity pools for active trad
 
 Before deploying to Mainnet, the team must run an on-chain Pause Drill on Testnet to guarantee emergency mechanisms function as intended and operators are trained in execution.
 
+For detailed incident response procedures, refer to:
+- [Owner-Compromise Response Runbook](../SECURITY.md#owner-compromise-response-runbook)
+- [Agent-Key Compromise Runbook](AGENT_KEY_COMPROMISE_RUNBOOK.md) - Detection, timelock rotation, and user communication for agent-key incidents
+
 ### 🔍 Security Context
 * The `pause` function blocks all deposits, withdrawals, and rebalances during an active hack, protocol compromise, or market emergency.
 * Operators must be familiar with the latency, transaction structure, and consequences of pausing/unpausing the contract.

@@ -545,6 +545,62 @@ fn test_new_owner_can_use_owner_functions_after_transfer() {
     assert!(!client.is_paused());
 }
 
+/// Test that the pending owner cannot cancel an ownership transfer (Issue #573).
+/// Only the current owner should be able to cancel, preventing griefing of
+/// legitimate ownership rotations.
+#[test]
+fn test_pending_owner_cannot_cancel_ownership_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let pending_owner = Address::generate(&env);
+    client.transfer_ownership(&pending_owner);
+
+    assert_eq!(client.get_pending_owner().unwrap(), pending_owner);
+
+    // The pending owner tries to cancel — should fail with CallerIsNotOwner
+    let result = client.try_cancel_ownership_transfer(&pending_owner);
+    assert!(
+        result.is_err(),
+        "pending owner should not be able to cancel ownership transfer"
+    );
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(34))),
+        "should fail with CallerIsNotOwner error"
+    );
+}
+
+/// Test that an uninvolved third party cannot cancel an ownership transfer (Issue #573).
+/// Only the current owner should be able to cancel.
+#[test]
+fn test_third_party_cannot_cancel_ownership_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let pending_owner = Address::generate(&env);
+    client.transfer_ownership(&pending_owner);
+
+    // An uninvolved third party tries to cancel — should fail with CallerIsNotOwner
+    let third_party = Address::generate(&env);
+    let result = client.try_cancel_ownership_transfer(&third_party);
+    assert!(
+        result.is_err(),
+        "third party should not be able to cancel ownership transfer"
+    );
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(34))),
+        "should fail with CallerIsNotOwner error"
+    );
+}
+
 #[test]
 #[should_panic(expected = "Error(Contract, #19)")]
 fn test_old_owner_cannot_use_owner_functions_after_transfer() {
