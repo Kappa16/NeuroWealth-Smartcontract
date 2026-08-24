@@ -11,6 +11,7 @@ This changelog is tied to the vault contract `Version` storage value. Each relea
 ## [Unreleased]
 <!-- Add entries below. Format: `- Short description (Issue #N).` -->
 <!-- If this PR bumps get_version(), note the new Version value here. -->
+- **Threat model & trust boundaries documentation (Issue #563):** Added comprehensive threat model, visual trust-boundary architecture diagram, explicit CAN/CANNOT actor capabilities matrix, external contract call site trust assumption mappings, and alignment verification with `docs/MAINNET_CHECKLIST.md` Sections 1 and 7 in `SECURITY.md`.
 - **Stale-state audit & CEI enforcement (Issue #568):** Refactored hot paths (`deposit`, `batch_deposit`, `withdraw`, `withdraw_all`, `rebalance`, and `update_total_assets`) to enforce Checks-Effects-Interactions (CEI). All storage reads and state mutations precede cross-contract calls. Added per-function review notes in `ARCHITECTURE.md`, regression test suite (`test_stale_state_audit.rs`), and a grep-based CI check script (`scripts/check-stale-state-audit.sh`).
 - `initialize` now rejects the zero address (the unspendable all-zero ed25519
   account) for `deployer`, `owner`, `agent`, and `usdc_token`, with dedicated

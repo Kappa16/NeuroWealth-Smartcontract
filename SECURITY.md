@@ -2,49 +2,155 @@
 
 This document describes the security architecture, trust model, and threat model for the NeuroWealth Vault contract.
 
-## Trust Model
+## Threat Model & Trust Boundaries (Issue #563)
 
-The NeuroWealth Vault implements a partitioned trust model with three distinct roles:
+The `NeuroWealthVault` smart contract operates in a multi-actor ecosystem involving privileged governance keys, automated off-chain execution services, end users, external DeFi protocols, and token issuers. System security depends on defining explicit trust boundaries and technical constraints around each actor.
 
-### Owner
+### Trust Boundary Architecture Diagram
 
-The contract owner has the following permissions:
-- **Pause/Unpause**: Can halt all deposits and withdrawals during emergencies
-- **Set TVL Cap**: Can limit total deposits to manage risk exposure
-- **Set User Deposit Cap**: Can limit per-user exposure
-- **Update Agent**: Can change the authorized AI agent address
-- **Upgrade Contract**: Can upgrade contract code (Phase 2)
+```mermaid
+graph TD
+    subgraph OwnerZone["Owner Trust Zone (Cold / Multisig Key)"]
+        Owner["Owner Key (Multisig / HSM)"]
+    end
 
-The owner **CANNOT**:
-- Access user funds directly
-- Withdraw funds from user accounts
-- Modify user balances
+    subgraph AgentZone["AI Agent Trust Zone (Hot Key)"]
+        Agent["AI Agent Hot Key (Automated Server)"]
+    end
 
-### AI Agent
+    subgraph UserZone["User Trust Zone (Public)"]
+        User["Depositors / Users"]
+    end
 
-The authorized AI agent has the following permissions:
-- **Rebalance**: Can call `rebalance()` to signal strategy changes and move funds between protocols
-- **Update Total Assets**: Can report yield accrual or strategy losses
-- **Read Access**: Can read all vault state to make yield decisions
+    subgraph CoreContract["NeuroWealth Vault Smart Contract"]
+        VaultState["Vault State & Share Accounting"]
+    end
 
-The agent **CANNOT**:
-- Withdraw user funds directly to itself
-- Change vault configuration (caps, pools)
-- Access USDC tokens directly outside of protocol interactions
-- Modify user balances without valid asset reporting
-- Pause or unpause the vault (owner-only, including emergency pause)
+    subgraph ExternalProtocols["External Protocols & Assets"]
+        USDC["USDC Token Issuer (Circle / SEP-41)"]
+        Blend["Blend Lending Pool"]
+        DEX["DEX Swap / Liquidity Pool"]
+    end
 
-### Users
+    Owner -->|Pause / Caps / Timelocked Upgrades / Pool Addresses| VaultState
+    Agent -->|Rebalance / Harvest / Report Assets| VaultState
+    User -->|Deposit / Withdraw / Strategy Choice| VaultState
+    VaultState -->|Transfer / Balance Query| USDC
+    VaultState -->|Supply / Redeem Liquidity| Blend
+    VaultState -->|Add / Remove Liquidity / Swap| DEX
+```
 
-Regular users have the following permissions:
-- **Deposit**: Can deposit USDC into the vault
-- **Withdraw**: Can withdraw their own USDC at any time
-- **Read**: Can query their balance and vault state
+### Detailed Trust Boundary Analysis (CAN vs. CANNOT)
 
-Users **CANNOT**:
-- Access other users' funds
-- Manipulate vault configuration
-- Call agent-only or owner-only functions
+#### 1. Owner Key (Cold / Multisig)
+The Owner key is the primary administrative authority of the contract. As mandated in [`docs/MAINNET_CHECKLIST.md`](docs/MAINNET_CHECKLIST.md) (Section 1), the Owner key MUST be stored in an offline/multisig cold environment separate from the AI Agent key.
+
+- **CAN**:
+  - Emergency pause and unpause the vault (`pause`, `emergency_pause`, `unpause`).
+  - Configure deposit safety caps (`set_caps`, `set_tvl_cap`, `set_user_deposit_cap`, `set_deposit_limits`).
+  - Set rebalance cooldowns and approval TTLs (`set_rebalance_cooldown`, `set_approval_ttl`).
+  - Initiate and execute timelocked AI agent rotations (`update_agent`, `confirm_agent_update`, `cancel_agent_update`).
+  - Schedule, execute, or cancel contract WASM upgrades behind a 24-hour timelock (`schedule_upgrade`, `execute_upgrade`, `cancel_upgrade`).
+  - Configure whitelisted external protocol pool addresses (`set_blend_pool`, `set_dex_pool`).
+  - Initiate and complete ownership transfers (`transfer_ownership`, `accept_ownership`).
+  - Execute emergency yield harvests during agent rotation (`emergency_harvest`).
+- **CANNOT**:
+  - Direct user USDC deposits to owner-controlled arbitrary wallets.
+  - Withdraw or burn user shares without explicit user authorization.
+  - Modify individual user share balances.
+  - Bypass upgrade or agent rotation timelocks (must wait 17,280 ledgers ≈ 24 hours).
+  - Perform instant WASM code replacements.
+
+#### 2. AI Agent Hot Key
+The AI Agent key is utilized by automated backend trading engines to execute strategy rebalances and update yield metrics. Because it operates in a hot server environment, it faces higher risk of exposure.
+
+- **CAN**:
+  - Trigger protocol allocation adjustments between whitelisted strategies (`rebalance`).
+  - Execute routine yield compounding (`harvest`).
+  - Report total asset valuations and strategy yield/losses (`update_total_assets`).
+- **CANNOT**:
+  - Transfer vault funds to external addresses outside whitelisted protocol pools.
+  - Change vault administrative configurations (caps, pool targets, timelocks, owners).
+  - Bypass solvency verification during asset updates (cannot inflate total assets beyond actual balance + pool holdings).
+  - Report losses exceeding the per-call decrease cap (capped at `max_decrease_bps`, default 10%).
+  - Pause or unpause the contract.
+  - Modify user strategy choices or user balances directly.
+
+#### 3. Depositors / Regular Users
+Depositors are un-privileged external accounts interacting with the vault to earn yield.
+
+- **CAN**:
+  - Deposit USDC into the vault to mint proportional shares (`deposit`, `batch_deposit`).
+  - Redeem vault shares for underlying USDC at any time (`withdraw`, `withdraw_all`).
+  - Select individual yield strategy preferences (`set_user_strategy`).
+  - Call permissionless maintenance utilities (`touch_user_ttl`).
+- **CANNOT**:
+  - Withdraw funds belonging to other depositors.
+  - Trigger vault rebalances or alter asset accounting.
+  - Modify vault caps or administrative settings.
+  - Inflate share exchange rates (defeated by storage-based asset accounting & minimum deposit floors).
+
+#### 4. Blend Protocol Pool Contract
+External lending pool integration.
+
+- **CAN**:
+  - Receive supplied USDC from the vault.
+  - Generate interest on deployed USDC positions.
+  - Return liquidity upon vault redemption requests.
+  - Report current pool utilization and liquidity availability.
+- **CANNOT**:
+  - Mutate `NeuroWealthVault` contract storage or state.
+  - Seize idle USDC held in the vault contract.
+  - Force liquidations or alter share accounting inside the vault.
+
+#### 5. DEX Protocol Pool Contract
+External Automated Market Maker (AMM) pool integration.
+
+- **CAN**:
+  - Execute token swaps during strategy shifts.
+  - Receive and return liquidity pool tokens.
+- **CANNOT**:
+  - Access vault funds outside explicit allowance approvals.
+  - Mutate vault contract state or storage.
+
+#### 6. USDC Token Issuer (Circle / Stellar Admin)
+The asset issuer controlling the underlying USDC token contract on Stellar.
+
+- **CAN**:
+  - Issue, mint, or burn global USDC tokens.
+  - Freeze or clawback token balances on flagged Stellar accounts (Stellar Asset Control flags).
+- **CANNOT**:
+  - Access or alter internal vault share accounting (`DataKey::Shares`, `DataKey::TotalShares`).
+  - Bypass contract authorization rules.
+
+---
+
+### Mapping External Call Sites to Trust Assumptions
+
+Every external contract call in [`neurowealth-vault/contracts/vault/src/lib.rs`](neurowealth-vault/contracts/vault/src/lib.rs) relies on specific trust assumptions and implements technical mitigations:
+
+| External Call Site | Target Contract | Trust Assumption | Security Mitigation |
+|-------------------|-----------------|------------------|---------------------|
+| `token_client.transfer` (`deposit`, `withdraw`, `batch_deposit`, `withdraw_all`) | USDC Token Contract | Assumes token contract conforms strictly to Soroban Token Standard (SEP-41) and transfers requested amount accurately without unexpected side-effects. | All storage state updates execute **before** external `transfer` calls (Checks-Effects-Interactions pattern enforced by Issue #568 and `check-stale-state-audit.sh`). |
+| `token_client.balance` (`withdraw`, `update_total_assets`, `rebalance`) | USDC Token Contract | Assumes token balance queries return non-manipulated, accurate token counts held by vault. | Balance queries are used as upper-bound solvency checks; direct token transfers into vault cannot inflate share price (storage-based accounting). |
+| `BlendPoolClient::submit_with_allowance` & `withdraw` (`supply_to_blend`, `withdraw_from_blend`) | Whitelisted Blend Pool | Assumes Blend pool honors liquidity deposit/withdrawal calls and accurately computes interest. | Blend pool address is restricted to `DataKey::BlendPool` whitelisted strictly by the Owner. Partial withdrawal logic prevents vault lockup during high pool utilization. |
+| `BlendPoolClient::get_balance` (`update_total_assets`, `get_protocol_balance`) | Whitelisted Blend Pool | Assumes Blend pool accurately reports deployed balance. | Deployed balance is queried solely for solvency validation; loss updates are bounded by owner co-signatures and per-call decrease caps (max 10%). |
+| `DexPoolClient::add_liquidity` & `remove_liquidity` (`supply_to_dex`, `withdraw_from_dex`) | Whitelisted DEX Pool | Assumes AMM pool processes liquidity additions/withdrawals cleanly without excessive slippage. | DEX pool target is restricted to `DataKey::DexPool` set by Owner. Strategy-switch fallback returns funds to idle if DEX pool liquidity is insufficient. |
+| `DexPoolClient::get_balance` (`update_total_assets`, `get_protocol_balance`) | Whitelisted DEX Pool | Assumes DEX pool correctly reports vault LP position value. | Solvency validation guardrail; updates are rate-limited and loss-capped. |
+
+---
+
+### Mainnet Checklist Alignment & Verification
+
+This threat model has been formally reviewed against [`docs/MAINNET_CHECKLIST.md`](docs/MAINNET_CHECKLIST.md):
+
+- **Section 1 Compliance (Key Management & Separation)**:
+  - Confirms complete independence of Owner ($G_{owner}$) and Agent ($G_{agent}$) keypairs.
+  - Strictly isolates the Hot Agent Key (capable only of `rebalance`/`harvest`/`update_total_assets`) from the Cold Owner Key (capable of administrative governance and code upgrades).
+- **Section 7 Compliance (Upgrade & Governance Multisig Plan)**:
+  - Enforces mandatory 24-hour timelock (`UPGRADE_TIMELOCK_LEDGERS = 17_280`) for all contract code upgrades (`schedule_upgrade` $\rightarrow$ `execute_upgrade`).
+  - Provides a cancellation window (`cancel_upgrade`) allowing security monitoring to block malicious or mistaken upgrades during the 24-hour window.
+  - Recommends Stellar Multisig or hardware cold storage for the Owner key on mainnet deployments.
 
 ## Withdrawal Guarantees
 
