@@ -903,3 +903,28 @@ so both privileged-role changes share one recovery window.
 Operational runbooks for scheduling, monitoring, and executing an upgrade live
 in [docs/UPGRADE_MIGRATION.md](docs/UPGRADE_MIGRATION.md).
 4. Minimize state changes in single transaction
+
+## Stale-State & Checks-Effects-Interactions Audit (Issue #568)
+
+To prevent stale-state vulnerabilities where storage reads performed after cross-contract calls observe externally influenced or unexpected state, all hot paths strictly follow the **Checks-Effects-Interactions (CEI)** pattern. Storage state reads and updates precede external interactions whenever feasible.
+
+### Hot-Path Per-Function Review Notes
+
+#### 1. `deposit` & `batch_deposit`
+- **Audit Findings**: Previously, `token_client.transfer(...)` was called before calculating state updates (`TotalDeposits`, `TotalShares`, `TotalAssets`, `Shares(user)`, `UserStrategy`).
+- **Resolution**: Re-structured so all contract checks, storage reads, share-minting math, and storage writes (`TotalDeposits`, `Shares`, `TotalShares`, `TotalAssets`, `UserStrategy`, `UserSharesIndex`) take place **before** initiating the external USDC token transfer call. No storage reads occur after the cross-contract `transfer`.
+
+#### 2. `withdraw` & `withdraw_all`
+- **Audit Findings**: If idle vault balance was lower than requested, `withdraw_amount_from_protocol(...)` called external protocol contracts (Blend/DEX) before validating `Shares(user)`, `TotalShares`, and `TotalAssets`. An unauthorized user or invalid withdrawal could cause unnecessary external protocol interactions before failing.
+- **Resolution**: User share balances (`Shares(user)`), `TotalShares`, and `TotalAssets` are now read and validated upfront before any external protocol withdrawal call. If a protocol withdrawal is required, reconciled share burn calculations use the pre-read snapshot totals (`convert_to_shares_internal_ceil_with_totals`), ensuring no storage reads take place after protocol interactions.
+
+#### 3. `rebalance`
+- **Audit Findings**: Pre-reads all configuration and timing parameters (`ApprovalTtl`, `BlendPool`, `DexPool`, `MinRebalanceInterval`, `LastRebalanceLedger`) before triggering protocol exit or supply legs.
+- **Resolution**: All storage parameters required for authorization and leg setup are read prior to invoking external protocol contracts (`submit_with_allowance`, `add_liquidity`, `remove_liquidity`).
+
+#### 4. `update_total_assets`
+- **Audit Findings**: The contract previously read `CurrentProtocol`, `BlendPool`, and `DexPool` keys intermittently between balance queries.
+- **Resolution**: All storage keys (`Agent`, `TotalAssets`, `UsdcToken`, `CurrentProtocol`, `BlendPool`, `DexPool`) are read upfront prior to executing cross-contract balance calls (`token_client.balance`, `BlendPoolClient::get_balance`, `DexPoolClient::get_balance`). Following external calls, only the invariant check (`total_available >= new_total`) and storage write (`TotalAssets`) execute.
+
+### Automated Verification
+A grep-based CI check script ([`scripts/check-stale-state-audit.sh`](file:///c:/Users/user/OneDrive/Documents/Open-source/NeuroWealth-Smartcontract/scripts/check-stale-state-audit.sh)) enforces these invariants on every PR.
