@@ -927,4 +927,46 @@ To prevent stale-state vulnerabilities where storage reads performed after cross
 - **Resolution**: All storage keys (`Agent`, `TotalAssets`, `UsdcToken`, `CurrentProtocol`, `BlendPool`, `DexPool`) are read upfront prior to executing cross-contract balance calls (`token_client.balance`, `BlendPoolClient::get_balance`, `DexPoolClient::get_balance`). Following external calls, only the invariant check (`total_available >= new_total`) and storage write (`TotalAssets`) execute.
 
 ### Automated Verification
-A grep-based CI check script ([`scripts/check-stale-state-audit.sh`](file:///c:/Users/user/OneDrive/Documents/Open-source/NeuroWealth-Smartcontract/scripts/check-stale-state-audit.sh)) enforces these invariants on every PR.
+A grep-based CI check script ([`scripts/check-stale-state-audit.sh`](file:///c:/Users/user/OneDrive/Documents/Open-source/NeuroWealth-Smartcontract/scripts/check-stale-state-audit.sh)) enforces these invariants on every PR.
+
+## Cross-Contract Call Surface & Failure-Mode Analysis (Issue #566)
+
+The `NeuroWealthVault` contract interacts with three categories of external smart contracts: the underlying USDC Token contract (Soroban SEP-41 standard), the Blend Lending Pool contract, and DEX AMM Pool contracts.
+
+### Summary Table of Cross-Contract Calls
+
+| Invocation | Target Contract | Entrypoints | Expected Success Path | Revert Behavior | Partial-Fill Behavior | Vault Accounting Reaction & Test Mapping |
+|------------|-----------------|-------------|-----------------------|-----------------|-----------------------|-------------------------------------------|
+| `token_client.transfer` | USDC Token | `deposit`, `batch_deposit`, `withdraw`, `withdraw_all` | Tokens transferred between user and vault contract address; emits `DepositEvent` / `WithdrawEvent`. | Reverts on-chain (insufficient balance/allowance or frozen account). | Binary (all-or-nothing); no partial transfers in SEP-41. | Storage state updates execute **before** `transfer` (CEI pattern). Transaction revert rolls back storage state atomically. Tested in [`test_reentrancy_defense.rs`](neurowealth-vault/contracts/vault/src/tests/test_reentrancy_defense.rs) & [`test_stale_state_audit.rs`](neurowealth-vault/contracts/vault/src/tests/test_stale_state_audit.rs). |
+| `token_client.balance` | USDC Token | `withdraw`, `withdraw_all`, `rebalance`, `update_total_assets`, `get_protocol_balance` | Returns `i128` token balance held at vault contract address. | Reverts only if contract WASM traps or token address invalid. | N/A (read-only query). | Balance queries act as upper-bound solvency checks. Direct token transfers to vault do not alter share exchange rates (storage-based accounting). |
+| `BlendPoolClient::submit_with_allowance` | Blend Pool | `supply_to_blend` (called during `rebalance`, `harvest`, `emergency_harvest`) | Approves allowance and supplies USDC to Blend pool; returns amount supplied. | Reverts if pool paused, supply cap reached, or invalid configuration. | Accepts up to max supply limit if configured; returns actual `supplied` amount. | Updates `CurrentProtocol` to `symbol_short!("blend")`. Revert rolls back transaction atomically without changing protocol assignment. Tested in `test_blend_integration.rs`. |
+| `BlendPoolClient::withdraw` / `withdraw_amount_from_protocol` | Blend Pool | `withdraw_from_blend` (called during `withdraw`, `withdraw_all`, `rebalance`, `harvest`) | Redeems USDC liquidity from Blend pool back to vault address. | Reverts if pool contract traps or is uninitialized. | If pool utilization is high, returns available liquidity (`withdrawn < requested`). | Reconciliation logic caps withdrawal to available USDC. User receives available funds and retains remaining shares (`convert_to_shares_internal_ceil_with_totals`). Tested in `test_partial_withdrawal` & [`test_strategy_switch_low_liquidity.rs`](neurowealth-vault/contracts/vault/src/tests/test_strategy_switch_low_liquidity.rs). |
+| `BlendPoolClient::get_balance` | Blend Pool | `get_protocol_balance`, `update_total_assets` | Returns active deployed balance in Blend pool for vault address. | Reverts if pool call traps. | N/A (read-only query). | Solvency check in `update_total_assets`. Reported loss capped at `max_decrease_bps` (default 10%). Tested in [`test_asset_decrease.rs`](neurowealth-vault/contracts/vault/src/tests/test_asset_decrease.rs) & [`test_update_total_assets_blend.rs`](neurowealth-vault/contracts/vault/src/tests/test_update_total_assets_blend.rs). |
+| `DexPoolClient::add_liquidity` | DEX Pool | `supply_to_dex` (called during `rebalance`, `harvest`, `emergency_harvest`) | Approves allowance, adds USDC liquidity to DEX pool, receives LP position tokens. | Reverts if slippage exceeded or pool paused. | Returns actual LP tokens minted based on pool balance ratio. | Updates `CurrentProtocol` to `symbol_short!("dex")`. If liquidity addition fails, strategy-switch fallback resets `CurrentProtocol` to `symbol_short!("none")` (idle) to protect funds. Tested in [`test_strategy_switch_low_liquidity.rs`](neurowealth-vault/contracts/vault/src/tests/test_strategy_switch_low_liquidity.rs). |
+| `DexPoolClient::remove_liquidity` | DEX Pool | `withdraw_from_dex` (called during `withdraw`, `withdraw_all`, `rebalance`, `harvest`) | Redeems DEX LP position and returns underlying USDC to vault. | Reverts if pool traps or DEX contract panics. | Returns available underlying tokens based on current pool liquidity. | `withdraw` reconciles against returned USDC and burns proportional shares. Tested in [`test_update_total_assets_dex.rs`](neurowealth-vault/contracts/vault/src/tests/test_update_total_assets_dex.rs). |
+| `DexPoolClient::get_balance` | DEX Pool | `get_protocol_balance`, `update_total_assets` | Returns current total valuation of vault LP tokens in DEX pool. | Reverts if pool call traps. | N/A (read-only query). | Used for solvency verification during asset updates. Guarded by decrease caps. |
+
+### Failure-Mode Analysis & Revert Path Mapping
+
+#### 1. Token Transfer Failure Path (`token_client.transfer`)
+- **Failure Trigger**: User account has insufficient USDC balance, insufficient token allowance, or account is subject to Stellar clawback/freeze flags.
+- **Handling**: The token contract call panics/reverts. Soroban automatically rolls back the entire atomic transaction frame.
+- **Verification**: Covered by `test_deposit.rs`, `test_withdraw.rs`, and defense-in-depth reentrancy test [`test_reentrancy_defense.rs`](neurowealth-vault/contracts/vault/src/tests/test_reentrancy_defense.rs).
+
+#### 2. Liquidity Crunch / Partial Fill (`withdraw_amount_from_protocol`)
+- **Failure Trigger**: External lending pool (Blend) or DEX pool has high utilization or constrained liquidity when a user requests a withdrawal exceeding idle vault USDC.
+- **Handling**: `withdraw_amount_from_protocol` redeems all available protocol liquidity (`available_usdc`). If `available_usdc < entitled_amount`, the vault processes a partial withdrawal: returning `available_usdc` and burning only `shares_to_burn = convert_to_shares_internal_ceil_with_totals(available_usdc, total_shares, total_assets)`. The user retains their remaining un-redeemed shares.
+- **Verification**: Fully covered in `test_partial_withdrawal` and [`test_strategy_switch_low_liquidity.rs`](neurowealth-vault/contracts/vault/src/tests/test_strategy_switch_low_liquidity.rs).
+
+#### 3. Low-Liquidity Strategy Switch Failure (`rebalance`)
+- **Failure Trigger**: When `rebalance()` attempts to switch strategies (e.g. from idle to DEX pool) and the target DEX pool lacks sufficient liquidity for the swap.
+- **Handling**: `rebalance()` catches low-liquidity failures and defaults `CurrentProtocol` back to `symbol_short!("none")` (idle USDC), ensuring vault funds remain safe and un-locked.
+- **Verification**: Covered by [`test_strategy_switch_low_liquidity.rs`](neurowealth-vault/contracts/vault/src/tests/test_strategy_switch_low_liquidity.rs).
+
+#### 4. Malicious Loss Reporting (`update_total_assets`)
+- **Failure Trigger**: Compromised or malfunctioning AI Agent reports an artificially inflated asset balance or an un-authorized loss.
+- **Handling**:
+  - *Inflation*: Blocked by solvency verification (`total_available >= new_total`) where `total_available` is the sum of idle USDC balance and verified protocol balances.
+  - *Loss*: Decreases require owner co-signatures (`require_is_owner`) and are hard-capped at `max_decrease_bps` (minimum cap floor 100 bps / 1%, default 10%).
+- **Verification**: Covered by [`test_asset_decrease.rs`](neurowealth-vault/contracts/vault/src/tests/test_asset_decrease.rs) and [`test_update_total_assets_blend.rs`](neurowealth-vault/contracts/vault/src/tests/test_update_total_assets_blend.rs).
+
