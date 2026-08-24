@@ -165,6 +165,8 @@ to compound yield during this window:
 If the owner keypair is suspected or confirmed to be compromised, follow this
 sequence immediately. Every step that requires owner auth is marked **[owner]**.
 
+For agent-key compromise procedures, see the [Agent-Key Compromise Runbook](docs/AGENT_KEY_COMPROMISE_RUNBOOK.md).
+
 ### Step 1 — Pause the vault (within minutes)
 
 The single fastest action to protect user funds is an emergency pause. No new
