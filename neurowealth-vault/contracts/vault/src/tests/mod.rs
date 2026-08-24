@@ -32,6 +32,7 @@ mod test_pool_config_idempotent;
 mod test_rebalance;
 mod test_rebalance_cooldown;
 mod test_rebalance_integration;
+mod test_reentrancy_defense;
 mod test_require_initialized;
 mod test_rounding_math;
 mod test_rounding_small_amounts;
