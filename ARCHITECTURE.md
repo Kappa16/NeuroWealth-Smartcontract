@@ -168,6 +168,10 @@ pub enum DataKey {
     PendingUpgradeHash,   // WASM hash awaiting timelock execution (#316)
     UpgradeTimelockExpiry,// ledger the pending upgrade unlocks at (#316)
     Deployer,             // deployer address (init only)
+    BlendApprovalTtl,     // legacy Blend-specific approval TTL (backward compat)
+    MaxConsecutiveFailures,// circuit-breaker threshold for failed rebalances (#439)
+    ConsecutiveFailures,  // running count of consecutive failed rebalances (#439)
+    UserSharesIndex,      // append-only index of addresses with non-zero shares (#440)
 }
 ```
 
