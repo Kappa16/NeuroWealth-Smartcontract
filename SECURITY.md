@@ -318,6 +318,10 @@ stellar contract invoke \
 
 ---
 
+## Incident Response
+
+The formal incident response plan — including severity classifications, war-room roles, and communication templates — is documented in [docs/INCIDENT_RESPONSE.md](docs/INCIDENT_RESPONSE.md).
+
 ## Audit & Mainnet Deployment Checklist
 
 Before any mainnet deployment, you must refer to and complete the formal [Mainnet Deployment Checklist](docs/MAINNET_CHECKLIST.md).

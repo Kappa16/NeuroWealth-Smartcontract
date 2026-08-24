@@ -258,6 +258,16 @@ jobs:
       - name: Verify DataKey::Balance deprecation
         run: bash scripts/check-balance-deprecation.sh
 
+  pub-fn-auth-gate:
+    name: Public Function Auth Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check all state-changing pub fn are classified in SECURITY.md
+        run: bash scripts/check-pub-fn-auth.sh
+
   changes:
     name: Detect changes
     runs-on: ubuntu-latest

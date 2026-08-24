@@ -722,6 +722,257 @@ quantities (user balance, redemption amount) derive from `TotalAssets`, not
 deposit → yield accrual → withdrawal → cap check, confirming that `TotalAssets`
 diverges from `TotalDeposits` after yield and that cap guards remain correct.
 
+## Formal Invariant Register
+
+This section documents the seven core invariants that must hold at every
+transaction boundary. Each invariant is stated formally, followed by a proof
+sketch grounded in the contract's execution model, the known violation windows
+(mid-transaction states), and the tests / fuzz targets that enforce it.
+
+> **Reading note for auditors:** "transaction boundary" means the point at
+> which a Soroban transaction commits or reverts. Soroban's single-threaded
+> execution model means no two transactions can concurrently mutate shared
+> storage, so every invariant below holds atomically.
+
+---
+
+### I-1 — Share Sum Consistency
+
+**Statement:** The sum of all individual user share balances equals
+`TotalShares`.
+
+```
+∑ Shares(u)  ==  TotalShares
+```
+
+**Why it holds:** `deposit()` atomically increments `Shares(user)` and
+`TotalShares` by the same `shares_minted` value within a single transaction.
+`withdraw()` atomically decrements `Shares(user)` and `TotalShares` by the
+same `shares_burned` value. There is no code path that touches one counter
+without touching the other — the only writers are the deposit and withdraw
+functions, and both use checked arithmetic to prevent silent corruption. Because
+Soroban transactions execute single-threaded and changes commit atomically, no
+partial-update window can leave the counters out of sync.
+
+**Known violation windows:** None — no mid-transaction observable state exists
+for external callers.
+
+**Enforcing tests / fuzz targets:**
+- `fuzz/fuzz_targets/share_accounting_invariants.rs` — checks sum after every
+  operation sequence.
+- `fuzz/fuzz_targets/deposit_withdraw_sequence.rs` — exercises arbitrary
+  interleaved deposit/withdraw sequences.
+- `tests/test_balance_shares_invariant.rs` — unit-level assertion over
+  multi-user scenarios.
+- `tests/test_shares.rs` — verifies share mint/burn symmetry.
+
+---
+
+### I-2 — Proportional Balance
+
+**Statement:** A user's redeemable USDC balance equals their proportional share
+of `TotalAssets`, rounded down.
+
+```
+user_balance(u)  ==  floor( Shares(u) × TotalAssets / TotalShares )
+```
+
+**Why it holds:** `get_balance(user)` is computed directly from this formula at
+read time — it is not a stored field that can drift. The numerator
+`Shares(u) × TotalAssets` uses `checked_mul` to prevent overflow, and integer
+division floors the result. Because `TotalAssets` is the authoritative share
+price denominator (updated only by `deposit`, `withdraw`, and
+`update_total_assets`), the formula always reflects the latest committed state.
+
+**Known violation windows:** None for external reads. Internally, during a
+`deposit` or `withdraw` transaction, `TotalAssets` and `TotalShares` are updated
+together before `Shares(user)` is written — but the transaction commits
+atomically, so an external observer never sees a partially-updated state.
+
+**Enforcing tests / fuzz targets:**
+- `fuzz/fuzz_targets/share_accounting_invariants.rs` — verifies the formula
+  holds after every fuzzed operation.
+- `tests/test_balance_shares_invariant.rs` — explicit assertion of the
+  proportionality formula.
+- `tests/test_rounding_math.rs` — boundary checks for the floor rounding
+  direction.
+
+---
+
+### I-3 — Non-Negative Yield
+
+**Statement:** Total managed assets are always at least equal to total principal
+deposited; yield is never negative.
+
+```
+TotalAssets  >=  TotalDeposits
+```
+
+**Why it holds:** `deposit()` increments both `TotalAssets` and `TotalDeposits`
+by the same `amount`. `withdraw()` decrements `TotalAssets` by the assets
+returned and `TotalDeposits` by the same amount. `update_total_assets()` can
+only *increase* `TotalAssets` — the function rejects any value below the
+current `TotalAssets`, bounding the maximum decrease per call to ≤10% via
+basis-point guard. Because `TotalAssets` starts equal to `TotalDeposits` at
+initialization and can only grow (or decrease only through legitimate
+withdrawals that mirror the `TotalDeposits` decrement), `TotalAssets` ≥
+`TotalDeposits` is always preserved.
+
+**Known violation windows:** None. There is no code path that increases
+`TotalDeposits` without a matching increase to `TotalAssets`, and no code path
+decreases `TotalAssets` below `TotalDeposits`.
+
+**Enforcing tests / fuzz targets:**
+- `fuzz/fuzz_targets/share_accounting_invariants.rs` — asserts the inequality
+  after every operation.
+- `tests/test_total_assets_cap.rs` — full lifecycle test: deposit → yield
+  accrual → withdrawal, confirming `TotalAssets` ≥ `TotalDeposits` throughout.
+
+---
+
+### I-4 — Per-User Share Bound
+
+**Statement:** No individual user can hold more shares than the total supply.
+
+```
+Shares(u)  <=  TotalShares   for all u
+```
+
+**Why it holds:** `Shares(u)` is set to `0` before a user's first deposit and
+then incremented strictly by the value added to `TotalShares` in the same
+transaction (I-1). Because `TotalShares` is the sum of all user shares and every
+user share is non-negative, no single entry can exceed the sum. I-1 is the
+stronger invariant; I-4 is a direct corollary.
+
+**Known violation windows:** None.
+
+**Enforcing tests / fuzz targets:**
+- `fuzz/fuzz_targets/share_accounting_invariants.rs` — asserts per-user bound
+  after every operation sequence.
+- `tests/test_shares.rs` — verifies individual share balances do not exceed
+  `TotalShares`.
+
+---
+
+### I-5 — Per-User Asset Bound
+
+**Statement:** No individual user's redeemable balance can exceed the total
+assets managed by the vault.
+
+```
+user_balance(u)  <=  TotalAssets   for all u
+```
+
+**Why it holds:** `user_balance(u)` is derived from I-2:
+`floor(Shares(u) × TotalAssets / TotalShares)`. Because `Shares(u) ≤
+TotalShares` (I-4) and `TotalAssets ≥ 0`, the result is bounded above by
+`floor(TotalShares × TotalAssets / TotalShares) = TotalAssets`. This bound
+tightens further when multiple users share the pool. Checked arithmetic ensures
+no overflow path could produce a spuriously large value.
+
+**Known violation windows:** None.
+
+**Enforcing tests / fuzz targets:**
+- `fuzz/fuzz_targets/share_accounting_invariants.rs` — combined assertion
+  following each deposit or withdraw.
+- `tests/test_balance_shares_invariant.rs` — explicit per-user ceiling check.
+
+---
+
+### I-6 — Non-Decreasing Exchange Rate
+
+**Statement:** The exchange rate (assets per share, expressed in 7-decimal
+fixed-point) is always at least 1.0, and never decreases over time.
+
+```
+get_exchange_rate()  >=  10_000_000   (i.e., rate >= 1.0 in 7-decimal fixed point)
+```
+
+**Why it holds:** At bootstrap (first deposit, when `TotalShares == 0` or
+`TotalAssets == 0`), `shares_minted = assets` (1:1), so `TotalAssets ==
+TotalShares` and the rate starts exactly at `10_000_000`. Thereafter,
+`update_total_assets()` can only increase `TotalAssets` without changing
+`TotalShares`, which strictly increases the rate. Withdrawals decrease both
+`TotalAssets` and `TotalShares` proportionally (shares burned map to the exact
+asset amount returned), so the rate is unchanged by withdrawals. New deposits
+also preserve the rate: `shares_minted = floor(amount × TotalShares /
+TotalAssets)` is floored, meaning the depositor may receive slightly fewer
+shares than the exact proportional share, which can only benefit (or not change)
+the rate for existing holders.
+
+**Known violation windows:** None. The floor-on-deposit and
+increase-only-`update_total_assets` constraints together prevent any decrease.
+
+**Enforcing tests / fuzz targets:**
+- `fuzz/fuzz_targets/share_accounting_invariants.rs` — asserts
+  `get_exchange_rate() >= 10_000_000` after every operation.
+- `fuzz/fuzz_targets/rounding_boundaries.rs` — stress-tests the floor/ceil
+  rounding directions at deposit and withdrawal boundaries.
+- `tests/test_exchange_rate.rs` — unit tests for bootstrap, yield accrual, and
+  post-withdrawal rate stability.
+- `tests/test_rounding_math.rs` — verifies rounding direction does not depress
+  the rate.
+
+---
+
+### I-7 — Idle + Deployed vs TotalAssets (Informational)
+
+**Statement:** The sum of idle balance and deployed assets is observable but
+may differ from `TotalAssets`. `TotalAssets` is the single authoritative value
+for all share pricing; `idle + deployed` reflects live on-chain balances before
+any pending yield reporting.
+
+```
+get_idle_balance() + get_deployed_assets()  ≈  TotalAssets
+  (equality holds only after update_total_assets() has been called with the
+   latest yield figure; otherwise idle+deployed may be < TotalAssets)
+```
+
+**Why the difference exists:** `TotalAssets` is updated by the AI agent via
+`update_total_assets(new_total)` to report yield earned in external protocols
+(e.g., accrued Blend interest). Until the agent makes that call, `TotalAssets`
+reflects the last reported total while the live on-chain balances (`idle +
+deployed`) may be lower (before reporting) or higher (after yield has accrued
+in Blend but before the vault has been notified). The idle getter reads the
+vault's own USDC token balance directly; the deployed getter performs a live
+cross-contract call to the active protocol. Neither modifies `TotalAssets`.
+
+**Design rationale:** Using a single authoritative `TotalAssets` for share
+pricing isolates the pricing model from the latency of cross-contract balance
+reads and from potential protocol-side rounding artefacts. The idle/deployed
+split is provided as an operational observability aid for dashboards and the AI
+agent, not as an accounting primitive.
+
+**Known violation windows:** The gap between `idle + deployed` and `TotalAssets`
+is always present to some degree in a live vault; it is not an error condition.
+The two figures converge after `update_total_assets()` reports the latest yield.
+
+**Enforcing tests / fuzz targets:**
+- `fuzz/fuzz_targets/share_accounting_invariants.rs` — verifies that
+  `TotalAssets` is the value used for share math, not `idle + deployed`.
+- `tests/test_total_assets_cap.rs` — confirms `TotalAssets` diverges from raw
+  balance after yield accrual and that share pricing uses `TotalAssets`.
+
+---
+
+### Summary Table
+
+| ID  | Invariant | Stronger than |
+|-----|-----------|---------------|
+| I-1 | `∑ Shares(u) == TotalShares` | — |
+| I-2 | `user_balance(u) == floor(Shares(u) × TotalAssets / TotalShares)` | — |
+| I-3 | `TotalAssets >= TotalDeposits` | — |
+| I-4 | `Shares(u) <= TotalShares` | Corollary of I-1 |
+| I-5 | `user_balance(u) <= TotalAssets` | Corollary of I-2 + I-4 |
+| I-6 | `get_exchange_rate() >= 10_000_000` | — |
+| I-7 | `idle + deployed ≈ TotalAssets` (informational) | — |
+
+Invariants I-4 and I-5 are corollaries included for clarity; any audit that
+confirms I-1 and I-2 implicitly covers them. I-7 is informational — it
+describes an observable property rather than a strict equality constraint.
+
+---
+
 ## expected_apy Validation (Issue #185)
 
 `rebalance(protocol, expected_apy)` validates `0 ≤ expected_apy ≤ 10 000`

@@ -275,6 +275,33 @@ Our CI pipeline (defined in `.github/workflows/ci.yml`) runs on every push and p
 5. **Dependency Audit**: `cargo-deny check` runs against the policy in [`deny.toml`](deny.toml), blocking dependencies with disallowed licenses or known security advisories.
 6. **Fuzz Tests** *(conditional)*: PRs that modify files under `neurowealth-vault/contracts/vault/src/` automatically trigger the `deposit_withdraw_sequence` fuzz target with short bounds (`-runs=1000 -max_total_time=120`). The same target runs with extended bounds on the weekly schedule. See [Running Fuzz Tests](#running-fuzz-tests) for local reproduction steps.
 
+### Public Function Auth Gate
+
+The `pub-fn-auth-gate` CI job (`scripts/check-pub-fn-auth.sh`) runs on every push and pull request. It cross-references every **state-changing** public function listed in `contract-spec.json` against the Access Control Summary table in `SECURITY.md`. The build fails if any state-changing function is missing a row in that table.
+
+This gate specifically catches new functions that were added to the contract but not yet classified — `check-access-control.sh` verifies that existing rows are *accurate*; this gate ensures no new function *slips through* without a documented access-control decision.
+
+#### Adding a new state-changing function
+
+When you add a new `pub fn` to the vault contract that modifies state, you must do **both** of the following before the PR can merge:
+
+1. **Add a row to the Access Control Summary table in `SECURITY.md`** with the correct Owner / Agent / User / Anyone columns filled in.
+2. **Update `contract-spec.json`** — add or update the function's entry with:
+   - `"state_changing": true`
+   - The correct `"access"` value (`"owner-only"`, `"agent-only"`, `"public"`, or `"pending-owner-only"`)
+   - `"requires_auth": true/false` as appropriate
+
+Both files must be updated in the **same PR** as the contract change so the gate and the accuracy check both pass together.
+
+#### N/A escape hatch — genuinely non-auth functions
+
+Occasionally a state-changing function is intentionally permissionless (for example, a storage-maintenance helper that anyone may call). In that case, mark it as N/A using **one** of these two methods:
+
+- **In `contract-spec.json`**: add `"auth_gate_na": true` to the function's entry.
+- **Via environment variable**: set `AUTH_GATE_NA_FUNCTIONS=fn_name` (colon-separated for multiple names) when invoking the script locally or in a custom workflow step.
+
+Both methods cause the gate to skip that function. Reserve this escape hatch for functions that genuinely have no meaningful access-control boundary — all owner-only, agent-only, and user-scoped functions must have a SECURITY.md row.
+
 ### Dependency Audit & Advisory Exceptions
 
 The dependency audit ([`EmbarkStudios/cargo-deny-action`](https://github.com/EmbarkStudios/cargo-deny-action)) enforces the license, advisory, and source policies defined in [`deny.toml`](deny.toml). To reproduce it locally:
