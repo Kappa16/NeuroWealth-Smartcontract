@@ -1,4 +1,5 @@
 mod test_access_control;
+mod test_adversarial_agent_simulation;
 mod test_agent_timelock;
 mod test_approval_ttl;
 mod test_asset_decrease;
