@@ -12,25 +12,8 @@ This changelog is tied to the vault contract `Version` storage value. Each relea
 <!-- Add entries below. Format: `- Short description (Issue #N).` -->
 - Document `harvest()` in README, ARCHITECTURE, SECURITY, and the state machine; add dedicated idle/deployed asset breakdown tests (Issues #499, #498, #501).
 <!-- If this PR bumps get_version(), note the new Version value here. -->
-- **Pause-semantics matrix (Issue #601):** Added definitive per-function
-  blocked/allowed table to `SECURITY.md` covering all public contract
-  functions. Exhaustive tests in `test_pause.rs` encode the matrix as
-  machine-checked assertions so future functions cannot silently bypass pause
-  checks without failing the test suite. PR checklist updated to require
-  classification of every new function.
-- **Least-privilege agent evaluation (Issue #606):** Added design doc
-  `docs/LEAST_PRIVILEGE_AGENT.md` evaluating separation of the rebalancer and
-  reporter agent sub-roles with a recorded go/no-go decision and interim
-  operational mitigations.
-- **Guardian-key design (Issue #607):** Added design doc
-  `docs/GUARDIAN_KEY_DESIGN.md` comparing guardian pattern vs. owner multi-sig
-  vs. status quo for `execute_upgrade`, with a phased implementation plan and
-  migration/compatibility notes.
-- **Bug bounty program (Issue #608):** Published `docs/BUG_BOUNTY.md` with
-  in-scope contracts/paths, four-tier severity rubric with example bug classes,
-  safe-harbor terms, response SLAs, payout process, and reporting channel.
-  Linked from `README.md` and `SECURITY.md`.
-- No `Version` bump (pre-mainnet, documentation/test-only changes).
+- **Threat model & trust boundaries documentation (Issue #563):** Added comprehensive threat model, visual trust-boundary architecture diagram, explicit CAN/CANNOT actor capabilities matrix, external contract call site trust assumption mappings, and alignment verification with `docs/MAINNET_CHECKLIST.md` Sections 1 and 7 in `SECURITY.md`.
+- **Stale-state audit & CEI enforcement (Issue #568):** Refactored hot paths (`deposit`, `batch_deposit`, `withdraw`, `withdraw_all`, `rebalance`, and `update_total_assets`) to enforce Checks-Effects-Interactions (CEI). All storage reads and state mutations precede cross-contract calls. Added per-function review notes in `ARCHITECTURE.md`, regression test suite (`test_stale_state_audit.rs`), and a grep-based CI check script (`scripts/check-stale-state-audit.sh`).
 - `initialize` now rejects the zero address (the unspendable all-zero ed25519
   account) for `deployer`, `owner`, `agent`, and `usdc_token`, with dedicated
   `VaultError` codes 62-65, so a vault can never be initialized with a
