@@ -163,6 +163,7 @@ deploy_contract() {
 initialize_vault() {
   local vault_address="$1"
   local token_address="$2"
+  local deployer_address="$3"
   
   log "Initializing vault contract..."
   
@@ -173,7 +174,7 @@ initialize_vault() {
     --rpc-url "$SOROBAN_RPC_URL" \
     -- \
     initialize \
-    --agent "$SOROBAN_SECRET_KEY" \
+    --agent "$deployer_address" \
     --usdc_token "$token_address" 2>&1; then
     log "✓ Vault initialized successfully"
   else
@@ -228,12 +229,13 @@ DEPLOYER_ADDRESS="$deployer_address"
 OWNER_ADDRESS="$deployer_address"
 
 # AI Agent (using deployer key for testing)
-AGENT_SECRET_KEY="$SOROBAN_SECRET_KEY"
+# Note: AGENT_SECRET_KEY is not saved here for security.
+# Use your SOROBAN_SECRET_KEY environment variable for transactions.
 AGENT_ADDRESS="$deployer_address"
 
 # Example Usage
-# To deposit: stellar contract invoke --id \$VAULT_CONTRACT_ID --source \$AGENT_SECRET_KEY --network \$SOROBAN_NETWORK_PASSPHRASE --rpc-url \$SOROBAN_RPC_URL -- deposit --user \$AGENT_ADDRESS --amount 10000000
-# To check balance: stellar contract invoke --id \$VAULT_CONTRACT_ID --source \$AGENT_SECRET_KEY --network \$SOROBAN_NETWORK_PASSPHRASE --rpc-url \$SOROBAN_RPC_URL -- -- get_balance --user \$AGENT_ADDRESS
+# To deposit: stellar contract invoke --id \$VAULT_CONTRACT_ID --source \$SOROBAN_SECRET_KEY --network \$SOROBAN_NETWORK_PASSPHRASE --rpc-url \$SOROBAN_RPC_URL -- deposit --user \$AGENT_ADDRESS --amount 10000000
+# To check balance: stellar contract invoke --id \$VAULT_CONTRACT_ID --source \$SOROBAN_SECRET_KEY --network \$SOROBAN_NETWORK_PASSPHRASE --rpc-url \$SOROBAN_RPC_URL -- -- get_balance --user \$AGENT_ADDRESS
 EOF
 
   log "Contract addresses saved to: $CONTRACT_ADDRESSES"
@@ -263,10 +265,10 @@ show_summary() {
   echo "     source $CONTRACT_ADDRESSES"
   echo ""
   echo "  2. Check your balance:"
-  echo "     stellar contract invoke --id \$VAULT_CONTRACT_ID --source \$AGENT_SECRET_KEY --network \$SOROBAN_NETWORK_PASSPHRASE --rpc-url \$SOROBAN_RPC_URL -- -- get_balance --user \$AGENT_ADDRESS"
+  echo "     stellar contract invoke --id \$VAULT_CONTRACT_ID --source \$SOROBAN_SECRET_KEY --network \$SOROBAN_NETWORK_PASSPHRASE --rpc-url \$SOROBAN_RPC_URL -- -- get_balance --user \$AGENT_ADDRESS"
   echo ""
   echo "  3. Deposit USDC:"
-  echo "     stellar contract invoke --id \$VAULT_CONTRACT_ID --source \$AGENT_SECRET_KEY --network \$SOROBAN_NETWORK_PASSPHRASE --rpc-url \$SOROBAN_RPC_URL -- deposit --user \$AGENT_ADDRESS --amount 10000000"
+  echo "     stellar contract invoke --id \$VAULT_CONTRACT_ID --source \$SOROBAN_SECRET_KEY --network \$SOROBAN_NETWORK_PASSPHRASE --rpc-url \$SOROBAN_RPC_URL -- deposit --user \$AGENT_ADDRESS --amount 10000000"
   echo ""
   echo "  4. Verify deployment:"
   echo "     ./scripts/verify-deployment.sh"
@@ -334,7 +336,7 @@ main() {
   vault_address=$(deploy_contract "$WASM_PATH" "Vault")
   
   # Initialize vault
-  initialize_vault "$vault_address" "$token_address"
+  initialize_vault "$vault_address" "$token_address" "$deployer_address"
   
   # Mint initial tokens
   mint_initial_tokens "$token_address" "$deployer_address"
@@ -349,4 +351,4 @@ main() {
 }
 
 # Run main function
-main "$@" 2>&1 | tee "$DEPLOYMENT_LOG"
+main "$@" | sed 's/S[A-Za-z0-9]\{55\}/[REDACTED_SECRET_KEY]/g' | tee "$DEPLOYMENT_LOG"

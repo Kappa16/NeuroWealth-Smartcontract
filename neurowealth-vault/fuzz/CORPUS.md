@@ -39,6 +39,18 @@ This directory contains fuzz testing harnesses for the NeuroWealth Vault contrac
 4. `user_balance <= expected_balance` (proportional share)
 5. Exchange rate >= 1.0
 
+### 5. `agent_update_timelock`
+**Purpose**: Exercises random propose/confirm/cancel sequences for agent updates while advancing the ledger to stress the timelock logic.
+**Input format**: 4-byte chunks where:
+- Byte 0: Operation selector (0=propose update, 1=confirm update, 2=cancel update, 3=advance ledger)
+- Bytes 1-2: Ledger/amount selector (u16 LE)
+- Byte 3: Agent selector (0-3)
+**Invariants checked**:
+1. At most one pending agent update exists at a time
+2. Confirmation only succeeds after the timelock delay has elapsed
+3. Cancellation is always allowed while a proposal is pending
+4. Scheduled `effective_ledger` is always in the future
+
 ## Running Fuzz Tests
 
 ```bash

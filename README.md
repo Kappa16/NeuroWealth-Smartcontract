@@ -91,7 +91,7 @@ NeuroWealth-Smartcontract/
 │   │       └── src/
 │   │           ├── lib.rs          # Contract logic, events, error types
 │   │           ├── topics.rs       # Exported event topic constants
-│   │           └── tests/          # Test modules (38 files)
+│   │           └── tests/          # Test modules (39 files)
 │   └── fuzz/                       # Libfuzzer fuzz targets
 │       ├── Cargo.toml
 │       └── fuzz_targets/
@@ -128,8 +128,6 @@ NeuroWealth-Smartcontract/
 ├── test/                           # Off-chain security tests
 │   ├── NotOwnerCompromiseBlastRadius.test.ts
 │   └── OwnerCompromiseBlastRadius.test.ts
-├── test_tvl_cap_stress/            # Standalone TVL-cap stress harness
-│   └── test_tvl_cap_stress.rs
 ├── .env.devnet.template
 ├── .github/
 │   ├── ISSUE_TEMPLATE/
@@ -157,8 +155,9 @@ directories once development begins:
 | Component | Directory | Status |
 |-----------|-----------|--------|
 | AI agent backend (Node.js / Python) | `agent/` | Planned |
-| Next.js web frontend | `frontend/` | Planned |
-| WhatsApp bot handler | `whatsapp/` | Planned |
+| Next.js web frontend | `frontend/` | Completed (#471, #472) |
+| WhatsApp bot handler | `whatsapp/` | Completed (#469) |
+| PostgreSQL / Supabase schema | `db/` / `supabase/` | Completed (#470) |
 
 ## Getting Started
 
@@ -217,14 +216,20 @@ See [`scripts/README-E2E.md`](scripts/README-E2E.md) for end-to-end devnet valid
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Storage layout, share accounting math, asset flow diagrams |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Development setup, CI requirements, PR process |
 | [`scripts/README-E2E.md`](scripts/README-E2E.md) | End-to-end devnet test guide |
-| [`SECURITY.md`](SECURITY.md) | Trust model, threat analysis, and owner-compromise runbook |
+| [`SECURITY.md`](SECURITY.md) | Trust model, threat analysis, pause-semantics matrix, and owner-compromise runbook |
+| [`docs/BUG_BOUNTY.md`](docs/BUG_BOUNTY.md) | Bug bounty scope, severity rubric, safe-harbor terms, and payout process |
 | [`docs/MAINNET_CHECKLIST.md`](docs/MAINNET_CHECKLIST.md) | Pre-mainnet deployment checklist |
 | [`docs/DEX_INTEGRATION.md`](docs/DEX_INTEGRATION.md) | DEX strategy behaviour, integration assumptions, and liquidity routing |
 | [`docs/BLEND_INTEGRATION_RESEARCH.md`](docs/BLEND_INTEGRATION_RESEARCH.md) | Blend protocol supply/withdraw design and cross-contract call patterns |
+| [`docs/LEAST_PRIVILEGE_AGENT.md`](docs/LEAST_PRIVILEGE_AGENT.md) | Least-privilege evaluation: separate rebalancer vs reporter agent roles (Issue #606) |
+| [`docs/GUARDIAN_KEY_DESIGN.md`](docs/GUARDIAN_KEY_DESIGN.md) | Guardian-key design: second signature for `execute_upgrade` (Issue #607) |
 
 ## Smart Contract
 The core Soroban vault contract handles all on-chain fund management.
-Key Functions
+
+### Key Functions
+
+#### Core & Administration
 
 | Function | Who Can Call | Description |
 | :--- | :--- | :--- |
@@ -233,6 +238,7 @@ Key Functions
 | `withdraw` | User (their own funds) | Withdraw USDC back to wallet |
 | `withdraw_all` | User (their own funds) | Withdraw all USDC by burning all shares |
 | `rebalance` | AI Agent only | Move funds between yield strategies (`protocol`, `expected_apy`, `min_out`; supported: `blend`, `dex`, `none`) |
+| `harvest` | AI Agent only | Withdraw accrued yield from `CurrentProtocol` and re-supply it with `min_out` slippage protection |
 | `set_blend_pool` | Owner only | Configure the Blend lending pool address |
 | `set_dex_pool` | Owner only | Configure the DEX liquidity pool address |
 | `get_balance` | Anyone | Read a user's current balance |
@@ -245,6 +251,69 @@ Key Functions
 | `set_tvl_cap` | Owner only | Sets the maximum total TVL that can be deposited |
 | `set_user_deposit_cap` | Owner only | Sets the maximum deposit amount per user |
 | `set_limits` | Owner only | **Deprecated**: Sets user deposit cap and TVL cap (use `set_caps` instead) |
+
+#### Strategy Preference
+
+| Function | Who Can Call | Description |
+| :--- | :--- | :--- |
+| `set_user_strategy` | User (their own preference) | Store a strategy preference (`conservative`, `balanced`, or `growth`) on-chain for the AI agent to read |
+| `get_user_strategy` | Anyone | Read a user's strategy preference (defaults to `balanced` when unset) |
+
+#### Share Math & Previews
+
+| Function | Who Can Call | Description |
+| :--- | :--- | :--- |
+| `preview_deposit_to_shares` | Anyone | Shares that would be minted for a given asset amount (rounds **down**) |
+| `preview_shares_to_assets` | Anyone | Assets that would be returned for a given share amount (rounds **down**) |
+| `preview_withdraw` | Anyone | Shares that would be burned to withdraw a given asset amount (rounds **up**, matching `withdraw`) |
+| `convert_to_shares` | Anyone | ERC-4626 asset → share conversion at the current rate (rounds **down**) |
+| `convert_to_assets` | Anyone | ERC-4626 share → asset conversion at the current rate (rounds **down**) |
+
+#### Asset Tracking
+
+| Function | Who Can Call | Description |
+| :--- | :--- | :--- |
+| `get_idle_balance` | Anyone | USDC held in the vault and not yet deployed to a protocol |
+| `get_deployed_assets` | Anyone | USDC currently supplied to the active protocol (`0` when `CurrentProtocol` is `none`) |
+| `get_asset_breakdown` | Anyone | Both figures in one call as `(idle, deployed)` — avoids two RPC round-trips |
+
+#### Storage Maintenance
+
+| Function | Who Can Call | Description |
+| :--- | :--- | :--- |
+| `touch_user_ttl` | Anyone | Extend the `Shares(user)` persistent entry TTL; returns `false` when no entry exists. Needed because read-only getters have no TTL side effects |
+
+#### Upgrade Timelock (Issue #316)
+
+The instant `upgrade()` entrypoint has been removed — see the *Upgrade Safety* section of [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+| Function | Who Can Call | Description |
+| :--- | :--- | :--- |
+| `schedule_upgrade` | Owner only (not paused) | Propose a new WASM hash; unlocks after `UPGRADE_TIMELOCK_LEDGERS` (17,280 ledgers ≈ 24 h) |
+| `execute_upgrade` | Owner only (not paused) | Apply the pending WASM once the timelock has elapsed and increment `Version` |
+| `cancel_upgrade` | Owner only | Clear the pending upgrade — the recovery path for a malicious or mistaken proposal |
+| `get_pending_upgrade` | Anyone | Returns `Some((wasm_hash, effective_ledger))` while an upgrade is pending, else `None` |
+
+#### Agent Timelock (Issue #317)
+
+Rotating the agent is a two-step, timelocked flow — see the *Agent Update Timelock* section of [`ARCHITECTURE.md`](ARCHITECTURE.md).
+
+| Function | Who Can Call | Description |
+| :--- | :--- | :--- |
+| `update_agent` | Owner only | **Propose** a new agent; unlocks after `AGENT_TIMELOCK_LEDGERS` (17,280 ledgers ≈ 24 h). The active agent is unchanged |
+| `confirm_agent_update` | Owner only | Apply the pending agent once the timelock has elapsed |
+| `cancel_agent_update` | Owner only | Clear the pending agent update |
+| `get_pending_agent_update` | Anyone | Returns `Some((pending_agent, effective_ledger))` while an update is pending, else `None` |
+
+#### Rebalance Throttle & Approvals
+
+| Function | Who Can Call | Description |
+| :--- | :--- | :--- |
+| `set_rebalance_cooldown` | Owner only | Minimum ledgers between `rebalance()` calls; `0` disables the cooldown |
+| `get_rebalance_cooldown` | Anyone | Read the configured cooldown in ledgers (`0` = disabled) |
+| `get_last_rebalance_ledger` | Anyone | Ledger of the most recent successful `rebalance()` (`0` if never called) |
+| `set_approval_ttl` | Owner only | Ledger lifetime for Blend/DEX token approvals (bounded to 1,000–500,000 ledgers) |
+| `get_approval_ttl` | Anyone | Read the configured approval TTL, or the default when unset |
 
 ## Security Model
 

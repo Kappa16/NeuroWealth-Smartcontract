@@ -105,6 +105,13 @@ jobs:
           echo "Generating TypeScript client from contract-spec.json..."
           node scripts/generate-client.js
 
+      - name: 🔍 TypeScript typecheck vault-client
+        working-directory: packages/vault-client
+        run: |
+          echo "Type-checking vault-client package..."
+          npm ci
+          npm run typecheck
+
       - name: 🔍 Check TypeScript client is up-to-date
         if: github.event_name == 'pull_request'
         run: |

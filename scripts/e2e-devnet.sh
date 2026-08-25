@@ -12,6 +12,11 @@
 #   SOROBAN_RPC_URL             — RPC endpoint (default: testnet)
 #   SOROBAN_NETWORK_PASSPHRASE  — Network passphrase (default: testnet)
 #
+# Optional env vars:
+#   E2E_TEST_TIMELOCK           — Set to "true" to test timelock flows
+#                                 (agent-update and upgrade). These require
+#                                 waiting for the 24-hour timelock to expire.
+#
 # Exit codes:
 #   0  — All scenarios passed
 #   1  — One or more scenarios failed
@@ -141,6 +146,14 @@ fi
 
 log "WASM size: $(wc -c < "$WASM_PATH") bytes"
 save_artifact "wasm_hash.txt" "$(sha256sum "$WASM_PATH" 2>/dev/null || shasum -a 256 "$WASM_PATH")"
+
+# Validate storage layout metadata
+log "Validating contract DataKey storage layout metadata..."
+python3 "$SCRIPT_DIR/check-storage-layout.py" "$WASM_PATH" "$WASM_PATH" \
+  --output "$ARTIFACTS_DIR/storage_layout_diff.txt" || {
+  log "ERROR: Storage layout check failed."
+  exit 1
+}
 
 # ---------------------------------------------------------------------------
 # Identity setup
@@ -499,6 +512,226 @@ elif echo "$EVENTS_OUTPUT" | grep -qi "unavailable\|unsupported\|error"; then
   record_pass "event_verification (skipped — RPC limitation)"
 else
   record_fail "event_verification" "Only found $EVENTS_FOUND/${#EXPECTED_EVENTS[@]} events. Missing: $EVENTS_MISSING"
+fi
+
+# ---------------------------------------------------------------------------
+# Scenario 8: Agent update timelock flow (optional, requires E2E_TEST_TIMELOCK=true)
+# ---------------------------------------------------------------------------
+
+if [[ "${E2E_TEST_TIMELOCK:-}" == "true" ]]; then
+  log_section "SCENARIO 8: AGENT UPDATE TIMELOCK"
+
+  # Generate a new agent identity for the update test
+  log "Generating new agent identity 'e2e-new-agent'..."
+  stellar keys generate e2e-new-agent --network testnet --fund 2>/dev/null || {
+    log "New agent identity may already exist, continuing..."
+  }
+  NEW_AGENT_ADDR=$(stellar keys address e2e-new-agent 2>/dev/null)
+  log "New agent address: $NEW_AGENT_ADDR"
+  save_artifact "new_agent_address.txt" "$NEW_AGENT_ADDR"
+
+  # Propose agent update (step 1 of 2)
+  UPDATE_AGENT_OUTPUT=$(run_soroban "Propose agent update" \
+    contract invoke \
+    --id "$CONTRACT_ID" \
+    --source e2e-deployer \
+    --network testnet \
+    -- \
+    update_agent \
+    --new_agent "$NEW_AGENT_ADDR" 2>&1) || {
+    record_fail "update_agent_propose" "Agent update proposal failed: $UPDATE_AGENT_OUTPUT"
+  }
+
+  save_artifact "tx_update_agent_propose.txt" "$UPDATE_AGENT_OUTPUT"
+
+  if echo "$UPDATE_AGENT_OUTPUT" | grep -qv "FAILED\|error\|Error"; then
+    record_pass "update_agent_propose"
+
+    # Verify agent is unchanged before confirmation
+    CURRENT_AGENT=$(run_soroban "Get current agent" \
+      contract invoke \
+      --id "$CONTRACT_ID" \
+      --source e2e-deployer \
+      --network testnet \
+      --send=no \
+      -- \
+      get_agent 2>&1 | tail -1 | tr -d '[:space:]"')
+
+    if [[ "$CURRENT_AGENT" == "$DEPLOYER_ADDR" ]]; then
+      record_pass "update_agent_pending (agent unchanged before confirmation)"
+    else
+      record_fail "update_agent_pending" "Agent changed before confirmation: $CURRENT_AGENT"
+    fi
+
+    # Get the effective ledger from the event or contract state
+    # For E2E, we'll note that confirmation requires waiting for the timelock
+    log "Agent update proposed. Confirmation requires waiting for the 24-hour timelock."
+    log "To complete the test, run this script again after the timelock expires."
+    save_artifact "timelock_note.txt" "Agent update proposed at $(timestamp). Wait 24 hours before confirmation."
+  fi
+
+  # Check if we should attempt confirmation (for re-run scenario)
+  if [[ -f "$ARTIFACTS_DIR/timelock_note.txt" ]]; then
+    log "Found previous timelock proposal, attempting confirmation..."
+    CONFIRM_OUTPUT=$(run_soroban "Confirm agent update" \
+      contract invoke \
+      --id "$CONTRACT_ID" \
+      --source e2e-deployer \
+      --network testnet \
+      -- \
+      confirm_agent_update 2>&1) || {
+      record_fail "confirm_agent_update" "Confirmation failed (timelock may not have expired): $CONFIRM_OUTPUT"
+    }
+
+    save_artifact "tx_confirm_agent_update.txt" "$CONFIRM_OUTPUT"
+
+    if echo "$CONFIRM_OUTPUT" | grep -qv "FAILED\|error\|Error"; then
+      record_pass "confirm_agent_update"
+
+      # Verify agent is now updated
+      UPDATED_AGENT=$(run_soroban "Get updated agent" \
+        contract invoke \
+        --id "$CONTRACT_ID" \
+        --source e2e-deployer \
+        --network testnet \
+        --send=no \
+        -- \
+        get_agent 2>&1 | tail -1 | tr -d '[:space:]"')
+
+      if [[ "$UPDATED_AGENT" == "$NEW_AGENT_ADDR" ]]; then
+        record_pass "agent_update_confirmed (agent successfully updated)"
+      else
+        record_fail "agent_update_confirmed" "Agent not updated after confirmation: $UPDATED_AGENT"
+      fi
+
+      # Clean up the timelock note
+      rm -f "$ARTIFACTS_DIR/timelock_note.txt"
+    fi
+  fi
+else
+  log "Skipping agent update timelock test (set E2E_TEST_TIMELOCK=true to enable)"
+fi
+
+# ---------------------------------------------------------------------------
+# Scenario 9: Upgrade timelock flow (optional, requires E2E_TEST_TIMELOCK=true)
+# ---------------------------------------------------------------------------
+
+if [[ "${E2E_TEST_TIMELOCK:-}" == "true" ]]; then
+  log_section "SCENARIO 9: UPGRADE TIMELOCK"
+
+  # Create a fake WASM hash for testing (32 bytes)
+  FAKE_WASM_HASH="0000000000000000000000000000000000000000000000000000000000000000"
+
+  # Schedule upgrade (step 1 of 2)
+  SCHEDULE_OUTPUT=$(run_soroban "Schedule upgrade" \
+    contract invoke \
+    --id "$CONTRACT_ID" \
+    --source e2e-deployer \
+    --network testnet \
+    -- \
+    schedule_upgrade \
+    --owner "$DEPLOYER_ADDR" \
+    --new_wasm_hash "$FAKE_WASM_HASH" 2>&1) || {
+    record_fail "schedule_upgrade" "Upgrade scheduling failed: $SCHEDULE_OUTPUT"
+  }
+
+  save_artifact "tx_schedule_upgrade.txt" "$SCHEDULE_OUTPUT"
+
+  if echo "$SCHEDULE_OUTPUT" | grep -qv "FAILED\|error\|Error"; then
+    record_pass "schedule_upgrade"
+    log "Upgrade scheduled. Execution requires waiting for the 24-hour timelock."
+    log "To complete the test, run this script again after the timelock expires."
+    save_artifact "upgrade_timelock_note.txt" "Upgrade scheduled at $(timestamp). Wait 24 hours before execution."
+  fi
+
+  # Check if we should attempt execution or cancellation (for re-run scenario)
+  if [[ -f "$ARTIFACTS_DIR/upgrade_timelock_note.txt" ]]; then
+    if [[ "${E2E_EXECUTE_UPGRADE:-}" == "true" ]]; then
+      log "Attempting execute_upgrade..."
+
+      # Take snapshot before execute_upgrade
+      bash "$SCRIPT_DIR/post-upgrade-smoke.sh" \
+        --mode snapshot \
+        --contract-id "$CONTRACT_ID" \
+        --network testnet \
+        --source e2e-deployer \
+        --snapshot "$ARTIFACTS_DIR/pre_upgrade_snapshot.json" 2>&1 || true
+
+      EXEC_OUTPUT=$(run_soroban "Execute upgrade" \
+        contract invoke \
+        --id "$CONTRACT_ID" \
+        --source e2e-deployer \
+        --network testnet \
+        -- \
+        execute_upgrade \
+        --owner "$DEPLOYER_ADDR" 2>&1) || {
+        record_fail "execute_upgrade" "Upgrade execution failed: $EXEC_OUTPUT"
+      }
+
+      save_artifact "tx_execute_upgrade.txt" "$EXEC_OUTPUT"
+
+      if echo "$EXEC_OUTPUT" | grep -qv "FAILED\|error\|Error"; then
+        record_pass "execute_upgrade"
+        log "Upgrade successfully executed."
+        rm -f "$ARTIFACTS_DIR/upgrade_timelock_note.txt"
+
+        # Post-upgrade getter sweep
+        log "Running post-upgrade read-only getter sweep smoke validation..."
+        if bash "$SCRIPT_DIR/post-upgrade-smoke.sh" \
+          --mode verify \
+          --contract-id "$CONTRACT_ID" \
+          --network testnet \
+          --source e2e-deployer \
+          --user "$USER_ADDR" \
+          --snapshot "$ARTIFACTS_DIR/pre_upgrade_snapshot.json" \
+          --output "$ARTIFACTS_DIR/post_upgrade_smoke.txt"; then
+          record_pass "post_upgrade_smoke_sweep"
+        else
+          record_fail "post_upgrade_smoke_sweep" "Post-upgrade getter sweep failed. See artifacts/post_upgrade_smoke.txt"
+        fi
+      fi
+    else
+      log "Found previous upgrade schedule, attempting cancellation (safer for E2E)..."
+      CANCEL_OUTPUT=$(run_soroban "Cancel upgrade" \
+        contract invoke \
+        --id "$CONTRACT_ID" \
+        --source e2e-deployer \
+        --network testnet \
+        -- \
+        cancel_upgrade \
+        --owner "$DEPLOYER_ADDR" 2>&1) || {
+        record_fail "cancel_upgrade" "Cancellation failed: $CANCEL_OUTPUT"
+      }
+
+      save_artifact "tx_cancel_upgrade.txt" "$CANCEL_OUTPUT"
+
+      if echo "$CANCEL_OUTPUT" | grep -qv "FAILED\|error\|Error"; then
+        record_pass "cancel_upgrade"
+        log "Upgrade successfully cancelled."
+        rm -f "$ARTIFACTS_DIR/upgrade_timelock_note.txt"
+      fi
+    fi
+  fi
+else
+  log "Skipping upgrade timelock test (set E2E_TEST_TIMELOCK=true to enable)"
+fi
+
+# ---------------------------------------------------------------------------
+# Scenario 10: Contract Getter Sweep (Smoke Validation)
+# ---------------------------------------------------------------------------
+
+log_section "SCENARIO 10: READ-ONLY GETTER SWEEP SMOKE VALIDATION"
+
+if bash "$SCRIPT_DIR/post-upgrade-smoke.sh" \
+  --mode verify \
+  --contract-id "$CONTRACT_ID" \
+  --network testnet \
+  --source e2e-deployer \
+  --user "$USER_ADDR" \
+  --output "$ARTIFACTS_DIR/post_upgrade_smoke.txt"; then
+  record_pass "getter_sweep_smoke"
+else
+  record_fail "getter_sweep_smoke" "One or more read-only getters failed or returned invalid data. See $ARTIFACTS_DIR/post_upgrade_smoke.txt"
 fi
 
 # ---------------------------------------------------------------------------

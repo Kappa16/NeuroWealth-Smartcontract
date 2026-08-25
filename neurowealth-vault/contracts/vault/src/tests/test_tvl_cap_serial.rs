@@ -198,3 +198,41 @@ fn test_serial_deposits_deterministic() {
         "TVL must equal sum of all deposits"
     );
 }
+
+// ============================================================================
+// Issue #539: Lowering TVL cap below current TotalAssets must not block withdrawals
+// ============================================================================
+
+/// Lower cap below TotalAssets, withdraw full balance, then verify the cap
+/// still gates new deposits.
+#[test]
+#[should_panic(expected = "Error(Contract, #41)")]
+fn test_tvl_cap_lowered_below_assets_does_not_block_withdrawals() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let deposit_amount = 8_000 * USDC;
+    let lowered_cap = 5_000 * USDC;
+
+    // Step 1: Set cap to 10_000 USDC
+    client.set_tvl_cap(&(10_000 * USDC));
+
+    // Step 2: User deposits 8_000 USDC
+    let user = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user, deposit_amount);
+    assert_eq!(client.get_total_assets(), deposit_amount);
+
+    // Step 3: Owner lowers cap to 5_000 USDC (below current TotalAssets)
+    client.set_tvl_cap(&lowered_cap);
+
+    // Step 4: User withdraws full 8_000 USDC — MUST succeed (no cap check)
+    client.withdraw(&user, &deposit_amount);
+    assert_eq!(client.get_total_assets(), 0);
+
+    // Step 5: New deposit exceeding the lowered cap must be rejected
+    let new_user = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &new_user, 6_000 * USDC);
+}

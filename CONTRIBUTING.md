@@ -11,6 +11,8 @@ This guide will help you get started with our development process, issue labelin
   - [Prerequisites](#prerequisites)
   - [Building the Contract](#building-the-contract)
   - [Running Tests](#running-tests)
+  - [Running Individual Tests and Test Modules](#running-individual-tests-and-test-modules)
+  - [Common Test Failures](#common-test-failures)
   - [Running Fuzz Tests](#running-fuzz-tests)
 - [CI Requirements](#ci-requirements)
 - [Coding Standards](#coding-standards)
@@ -107,6 +109,116 @@ For frontend or agent changes, run:
 ```bash
 npm test
 ```
+
+> **Touching share accounting?** If your change lands anywhere under
+> `neurowealth-vault/contracts/vault/src/`, CI also runs the deposit/withdraw
+> fuzz target. Reproduce it locally *before* pushing — see
+> [Running Fuzz Tests](#running-fuzz-tests) for the one-line smoke run.
+
+### Running Individual Tests and Test Modules
+
+The full suite takes a while, so during local iteration it is usually faster to
+run just the tests you care about. All commands below are run from
+`neurowealth-vault/`.
+
+#### How the test suite is laid out
+
+Every vault test lives in a module under
+`contracts/vault/src/tests/` and is pulled into the crate by
+`contracts/vault/src/lib.rs`:
+
+```rust
+#[cfg(test)]
+#[path = "tests/mod.rs"]
+mod comprehensive_tests;
+```
+
+They are therefore **unit tests compiled into the library test binary**, not
+separate integration-test binaries in a `tests/` directory. Two consequences:
+
+- `cargo test --test test_deposit` does **not** work — there is no test target
+  by that name, and cargo fails with
+  ``error: no test target named `test_deposit` in default-run packages``.
+- Every test's full path is prefixed with `comprehensive_tests::`, e.g.
+  `comprehensive_tests::test_deposit::test_deposit_minimum_succeeds`.
+
+You filter tests by **substring match on that full path**.
+
+#### Run a single test
+
+```bash
+# Substring match — runs every test whose full path contains this string.
+cargo test test_confirm_before_timelock_rejected
+
+# Exact match only (useful when one name is a prefix of another).
+cargo test comprehensive_tests::test_agent_timelock::test_cancel_clears_pending_agent -- --exact
+```
+
+#### Run a single test module
+
+Filter on the module path. The trailing `::` keeps the match from spilling into
+similarly named modules — a bare `test_upgrade` matches both
+`test_upgrade_timelock` and `test_upgrade_compatibility`:
+
+```bash
+# All tests in contracts/vault/src/tests/test_deposit.rs
+cargo test comprehensive_tests::test_deposit::
+
+# Just the upgrade-timelock module, not test_upgrade_compatibility
+cargo test comprehensive_tests::test_upgrade_timelock::
+```
+
+#### Useful flags
+
+```bash
+# List every test without running any — handy for finding the exact path.
+cargo test -- --list
+
+# Show println!/std::eprintln! output from passing tests (suppressed by default).
+cargo test test_deposit -- --nocapture
+
+# Run serially. Some stress modules are timing/ordering sensitive.
+cargo test -- --test-threads=1
+```
+
+#### Run tests with features
+
+Two optional features gate the production-interface pool tests. The modules are
+declared `#![cfg(all(test, feature = "..."))]`, so **without the flag they
+compile to nothing and are silently skipped** — no error, no skip message:
+
+```bash
+# Blend production-interface tests (contracts/vault/src/tests/test_blend_devnet.rs)
+cargo test -p neurowealth-vault --features blend-devnet
+
+# DEX production-interface tests (contracts/vault/src/tests/test_dex_devnet.rs)
+cargo test -p neurowealth-vault --features dex-devnet
+
+# Everything at once. Worth running before pushing, because the Clippy CI job
+# uses --all-features and will lint feature-gated test code you never compiled.
+cargo test -p neurowealth-vault --all-features
+```
+
+Feature flags combine with filters as expected:
+
+```bash
+cargo test -p neurowealth-vault --features dex-devnet comprehensive_tests::test_dex_devnet::
+```
+
+### Common Test Failures
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| ``error: no test target named `test_deposit` `` | Tests are library unit-test modules, not integration-test binaries. | Filter by module path instead: `cargo test comprehensive_tests::test_deposit::`. See [above](#run-a-single-test-module). |
+| `test result: ok. 0 passed; ... N filtered out` | The filter string matched nothing (typo, or the module is feature-gated). | Run `cargo test -- --list` and copy the exact path; add `--features blend-devnet` / `dex-devnet` if the module is gated. |
+| Feature-gated tests appear not to exist | Without the feature flag the whole file is `cfg`'d out — it does not even show up in `--list`. | Pass the matching `--features` flag. |
+| `panicked ... expected "Error(Contract, #41)"` but a different code was returned | Contract errors surface as their `VaultError` discriminant, not the message text. A code shifted or a different guard fired first. | Look up the discriminant in the `VaultError` enum in `contracts/vault/src/lib.rs` and update the `#[should_panic(expected = ...)]` string, or fix the ordering of the guards. |
+| A test in `test_budget.rs` fails on CPU/memory | A change pushed an operation past the recorded ledger-resource ceiling. | Check the baselines in [ARCHITECTURE.md](ARCHITECTURE.md) (*Ledger Resource Baselines*). Either reduce the cost or, if the increase is justified, raise the bound in the same PR and explain why. |
+| Passes individually but fails in the full run | Ordering- or timing-sensitive stress test. | Reproduce with `cargo test -- --test-threads=1` before assuming flakiness. |
+| `cargo fmt --all -- --check` fails in CI but the code looks fine | Formatting drift. | Run `cargo fmt --all` and commit the result. |
+| Clippy fails in CI but passes locally | CI runs `cargo clippy --all-targets --all-features -- -D warnings`; a plain local run skips gated code and warnings are not denied. | Reproduce the exact CI command locally. |
+| `stellar contract build` fails on a missing target or toolchain | The `wasm32-unknown-unknown` target is not installed, or the Stellar CLI does not match the pin. | `rustup target add wasm32-unknown-unknown`, then reinstall the version pinned in [`.stellar-version`](.stellar-version). Version drift is the most common cause of local-vs-CI differences. |
+| `cargo fuzz` is not a recognised command, or the target refuses to build on stable | Fuzzing requires the nightly toolchain and `cargo-fuzz`. | Install both, then use `cargo +nightly fuzz run ...` — see [Running Fuzz Tests](#running-fuzz-tests). |
 
 ### Running Fuzz Tests
 

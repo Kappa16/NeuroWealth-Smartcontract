@@ -80,6 +80,41 @@ fn test_blend_integration_withdraw_via_rebalance() {
     assert_eq!(blend_wd_events.len(), 1);
 }
 
+/// The vault measures supply outcome via USDC balance delta, not the pool's
+/// reported return value. A Blend pool that lies about its return value from
+/// `submit_with_allowance` cannot inflate vault accounting.
+#[test]
+fn test_blend_balance_delta_against_lying_pool() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (vault_id, _agent, owner, usdc_token, blend_pool) = setup_vault_with_token_and_blend(&env);
+    let vault_client = NeuroWealthVaultClient::new(&env, &vault_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+    let blend_client = MockBlendPoolClient::new(&env, &blend_pool);
+
+    vault_client.set_blend_pool(&owner, &blend_pool);
+
+    let deposit_amount = 50_000_000_i128;
+    token_client.mint(&vault_id, &deposit_amount);
+
+    // Configure the pool to lie: it will actually transfer `deposit_amount`
+    // but report double that amount as its return value.
+    let lying_reported = deposit_amount * 2;
+    blend_client.set_reported_supply_amount(&lying_reported);
+
+    vault_client.rebalance(&Symbol::new(&env, "blend"), &850, &0_i128);
+
+    let total_assets = vault_client.get_total_assets();
+    assert_eq!(
+        total_assets, deposit_amount,
+        "vault must record actual balance delta, not the pool's reported amount"
+    );
+
+    assert_eq!(token_client.balance(&blend_pool), deposit_amount);
+    assert_eq!(token_client.balance(&vault_id), 0);
+}
+
 #[test]
 fn test_blend_integration_balance_read() {
     let env = Env::default();

@@ -11,7 +11,9 @@ use crate::{
     TOPIC_EMERGENCY_PAUSED, TOPIC_INIT, TOPIC_PAUSED, TOPIC_REBALANCE, TOPIC_TVL_CAP_UPDATED,
     TOPIC_UNPAUSED, TOPIC_USER_CAP_UPDATED, TOPIC_WITHDRAW,
 };
-use soroban_sdk::{symbol_short, testutils::Address as _, Address, BytesN, Env, TryFromVal};
+use soroban_sdk::{
+    symbol_short, testutils::Address as _, testutils::Ledger, Address, BytesN, Env, TryFromVal,
+};
 
 #[test]
 fn test_initialize_emits_init_event_with_correct_payload() {
@@ -322,6 +324,8 @@ fn test_set_tvl_cap_emits_tvl_cap_event_with_correct_payload() {
 
     let old_tvl_cap = 100_000_000_000_i128; // Default from initialize
     let new_tvl_cap = 200_000_000_000_i128;
+    let expected_ts: u64 = 123456789;
+    env.ledger().with_mut(|li| li.timestamp = expected_ts);
     client.set_tvl_cap(&new_tvl_cap);
 
     let tvl_events = find_events_by_topic(env.events().all(), &env, TOPIC_TVL_CAP_UPDATED);
@@ -332,6 +336,7 @@ fn test_set_tvl_cap_emits_tvl_cap_event_with_correct_payload() {
         TvlCapUpdatedEvent::try_from_val(&env, data).expect("Should be a TvlCapUpdatedEvent");
     assert_eq!(event.old_cap, old_tvl_cap);
     assert_eq!(event.new_cap, new_tvl_cap);
+    assert_eq!(event.timestamp, expected_ts, "timestamp must match");
 }
 
 #[test]
@@ -344,6 +349,8 @@ fn test_set_user_deposit_cap_emits_user_cap_event_with_correct_payload() {
 
     let old_user_cap = 10_000_000_000_i128; // Default from initialize
     let new_user_cap = 20_000_000_000_i128;
+    let expected_ts: u64 = 123456789;
+    env.ledger().with_mut(|li| li.timestamp = expected_ts);
     client.set_user_deposit_cap(&new_user_cap);
 
     let user_events = find_events_by_topic(env.events().all(), &env, TOPIC_USER_CAP_UPDATED);
@@ -357,6 +364,7 @@ fn test_set_user_deposit_cap_emits_user_cap_event_with_correct_payload() {
         .expect("Should be a UserDepositCapUpdatedEvent");
     assert_eq!(event.old_cap, old_user_cap);
     assert_eq!(event.new_cap, new_user_cap);
+    assert_eq!(event.timestamp, expected_ts, "timestamp must match");
 }
 
 #[test]
@@ -369,10 +377,47 @@ fn test_set_caps_emits_caps_event_with_correct_payload() {
 
     let user_cap = 25_000_000_000_i128;
     let tvl_cap = 150_000_000_000_i128;
+    let old_user_cap = 10_000_000_000_i128;
+    let old_tvl_cap = 100_000_000_000_i128;
+    let expected_ts: u64 = 123456789;
+    env.ledger().with_mut(|li| li.timestamp = expected_ts);
     client.set_caps(&user_cap, &tvl_cap);
 
+    // Must emit individual UserDepositCapUpdatedEvent
+    let user_events = find_events_by_topic(env.events().all(), &env, TOPIC_USER_CAP_UPDATED);
+    assert_eq!(
+        user_events.len(),
+        1,
+        "set_caps should emit a UserDepositCapUpdatedEvent"
+    );
+    let (_, _, user_data) = &user_events[0];
+    let user_event = UserDepositCapUpdatedEvent::try_from_val(&env, user_data)
+        .expect("Should be a UserDepositCapUpdatedEvent");
+    assert_eq!(user_event.old_cap, old_user_cap);
+    assert_eq!(user_event.new_cap, user_cap);
+    assert_eq!(user_event.timestamp, expected_ts);
+
+    // Must emit individual TvlCapUpdatedEvent
+    let tvl_events = find_events_by_topic(env.events().all(), &env, TOPIC_TVL_CAP_UPDATED);
+    assert_eq!(
+        tvl_events.len(),
+        1,
+        "set_caps should emit a TvlCapUpdatedEvent"
+    );
+    let (_, _, tvl_data) = &tvl_events[0];
+    let tvl_event =
+        TvlCapUpdatedEvent::try_from_val(&env, tvl_data).expect("Should be a TvlCapUpdatedEvent");
+    assert_eq!(tvl_event.old_cap, old_tvl_cap);
+    assert_eq!(tvl_event.new_cap, tvl_cap);
+    assert_eq!(tvl_event.timestamp, expected_ts);
+
+    // Must still emit combined CapsUpdatedEvent for backward compatibility
     let caps_events = find_events_by_topic(env.events().all(), &env, TOPIC_CAPS_UPDATED);
-    assert!(!caps_events.is_empty(), "set_caps should emit a caps event");
+    assert_eq!(
+        caps_events.len(),
+        1,
+        "set_caps should emit a CapsUpdatedEvent"
+    );
 
     let (_, _, data) = &caps_events[0];
     let event = CapsUpdatedEvent::try_from_val(&env, data).expect("Should be a CapsUpdatedEvent");

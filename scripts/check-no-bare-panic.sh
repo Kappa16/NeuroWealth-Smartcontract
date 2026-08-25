@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
+# shellcheck shell=bash
 # =============================================================================
-# check-no-bare-panic.sh — Block bare panic! in production contract paths.
+# check-no-bare-panic.sh — Block bare panic!/assert! in production contract paths.
 #
 # Scans the vault contract source files (excluding test modules) for bare
-# panic!() calls. Use of panic_with_error! is the required pattern in all
-# production paths; bare panic! is forbidden because it produces an opaque
-# error code rather than a typed VaultError.
+# panic!(), assert!(), assert_eq!(), assert_ne!(), and debug_assert!() calls.
+# Use of panic_with_error! is the required pattern in all production paths;
+# bare macros are forbidden because they produce opaque, untyped errors.
 #
 # Exit codes:
-#   0 — no bare panic! found (CI green)
-#   1 — bare panic! detected (CI red)
+#   0 — no bare macros found (CI green)
+#   1 — bare macro detected (CI red)
 #
 # Usage:
 #   ./scripts/check-no-bare-panic.sh [src_dir]
@@ -17,6 +18,13 @@
 # Arguments:
 #   src_dir   Path to the contract src directory
 #             (default: neurowealth-vault/contracts/vault/src)
+#
+# Allow-list:
+#   Lines containing "panic_with_error!" are explicitly permitted — that is the
+#   structured alternative this script is designed to encourage.
+#
+#   Test files (paths matching */tests/* or *test*.rs) are excluded because
+#   bare assert! / assert_eq! are idiomatic in test code.
 # =============================================================================
 
 set -euo pipefail
@@ -28,58 +36,46 @@ if [[ ! -d "$SRC_DIR" ]]; then
   exit 1
 fi
 
-echo "Scanning production sources for bare panic! calls..."
+echo "Scanning production sources for bare panic!/assert! calls..."
 echo "Source directory: $SRC_DIR"
 echo ""
 
-# Collect production Rust files — exclude the tests/ sub-directory and any
-# file whose path contains "test" or "fuzz".
-mapfile -t PROD_FILES < <(
-  find "$SRC_DIR" -name "*.rs" \
-    ! -path "*/tests/*" \
-    ! -name "*test*" \
-    ! -name "*fuzz*"
-)
+# Macros to flag in production code.
+BARE_PATTERN='panic!\|assert!\|assert_eq!\|assert_ne!\|debug_assert!\|debug_assert_eq!\|debug_assert_ne!'
 
-if [[ ${#PROD_FILES[@]} -eq 0 ]]; then
-  echo "WARNING: no production source files found in $SRC_DIR" >&2
-  exit 0
-fi
+FOUND=0
 
-echo "Production files checked:"
-for f in "${PROD_FILES[@]}"; do
-  echo "  $f"
-done
-echo ""
-
-# grep exits 1 when no match is found; we invert the logic manually.
-VIOLATIONS=()
-for f in "${PROD_FILES[@]}"; do
-  # Match bare `panic!(` — ignore `panic_with_error!` (contains underscore).
-  # The negative look-ahead ensures `panic_with_error!` is not caught:
-  #   grep -P requires PCRE; fall back to a two-step filter for portability.
-  hits=$(grep -n 'panic!' "$f" | grep -v 'panic_with_error' || true)
-  if [[ -n "$hits" ]]; then
-    VIOLATIONS+=("$f")
-    echo "VIOLATION in $f:"
-    echo "$hits"
+while IFS= read -r file; do
+  while IFS= read -r line; do
+    # Skip comment lines
+    if [[ "$line" =~ ^[[:space:]]*/[/*] ]]; then
+      continue
+    fi
+    # Skip lines that already use the structured macro
+    if [[ "$line" == *"panic_with_error!"* ]]; then
+      continue
+    fi
+    echo "VIOLATION in $file:"
+    echo "  $line"
     echo ""
-  fi
-done
+    FOUND=1
+  done < <(grep -n "$BARE_PATTERN" "$file" 2>/dev/null || true)
+done < <(find "$SRC_DIR" -name "*.rs" \
+  ! -path "*/tests/*"  \
+  ! -name "*test*.rs"  \
+  ! -name "test.rs"    \
+  ! -name "*fuzz*")
 
-if [[ ${#VIOLATIONS[@]} -gt 0 ]]; then
+if [[ "$FOUND" -eq 1 ]]; then
   echo "──────────────────────────────────────────────────────────────────"
-  echo "FAIL: bare panic! found in ${#VIOLATIONS[@]} production file(s)."
+  echo "FAIL: bare panic!/assert! macros found in production source."
   echo ""
-  echo "Production code must use panic_with_error!(env, VaultError::...)"
-  echo "instead of bare panic!(). This produces a typed on-chain error"
-  echo "that integrators and indexers can decode."
-  echo ""
-  echo "To suppress an intentional use, add a comment on the same line:"
-  echo "  // allow-bare-panic: <reason>"
-  echo "and re-run this script — the line will be excluded from the scan."
+  echo "Production code must use panic_with_error!(&env, VaultError::...)"
+  echo "instead of bare panic!()/assert!(). This produces a typed on-chain"
+  echo "error that integrators and indexers can decode."
   echo "──────────────────────────────────────────────────────────────────"
   exit 1
 fi
 
-echo "OK: no bare panic! found in production sources."
+echo "OK: no bare panic!/assert! macros found in production sources."
+exit 0

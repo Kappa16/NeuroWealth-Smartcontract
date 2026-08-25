@@ -21,10 +21,13 @@ export {
 
   // Event payload interfaces
   type VaultInitializedEvent,
+  type InitFailedEvent,
   type DepositEvent,
   type WithdrawEvent,
   type RebalanceEvent,
+  type RebalanceFailedEvent,
   type ProtocolChangedEvent,
+  type PauseEvent,
   type VaultPausedEvent,
   type VaultUnpausedEvent,
   type EmergencyPausedEvent,
@@ -32,23 +35,29 @@ export {
   type UserDepositCapUpdatedEvent,
   type CapsUpdatedEvent,
   type LimitsUpdatedEvent,
+  type DepositLimitsUpdatedEvent,
   type AgentUpdatedEvent,
+  type AgentUpdateProposedEvent,
+  type AgentUpdateConfirmedEvent,
+  type AgentUpdateCancelledEvent,
   type OwnershipTransferInitiatedEvent,
   type OwnershipTransferredEvent,
   type OwnershipTransferCancelledEvent,
   type AssetsUpdatedEvent,
   type UpgradedEvent,
-  type DepositLimitsUpdatedEvent,
-  type BlendPoolConfiguredEvent,
-  type DexPoolConfiguredEvent,
-  type DexSupplyEvent,
-  type DexWithdrawEvent,
+  type UpgradeScheduledEvent,
+  type UpgradeCancelledEvent,
   type BlendSupplyEvent,
   type BlendWithdrawEvent,
-  type RebalanceFailedEvent,
+  type BlendPoolConfiguredEvent,
+  type DexSupplyEvent,
+  type DexWithdrawEvent,
+  type DexPoolConfiguredEvent,
+  type UserStrategyUpdatedEvent,
 
   // Error codes
   VaultErrorCode,
+  VaultError,
   type VaultErrorCode as VaultErrorCodeType,
 
   // Constants
@@ -57,3 +66,7 @@ export {
   DEFAULT_MAX_DEPOSIT,
   DECIMAL_PLACES,
 } from './generated/vault';
+
+// Event listener
+export { VaultEventListener } from './event-listener';
+export type { EventListenerOptions, EventHandler } from './event-listener';

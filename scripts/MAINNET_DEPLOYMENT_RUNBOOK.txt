@@ -1,0 +1,283 @@
+================================================================================
+NEUROWEALTH MAINNET DEPLOYMENT RUNBOOK
+================================================================================
+
+This runbook guides operators through production mainnet deployment with all
+safety checks, dry-run mode, and rollback procedures. Follow each step exactly.
+
+Reference: docs/MAINNET_CHECKLIST.md
+
+================================================================================
+PREREQUISITES (Complete BEFORE deployment)
+================================================================================
+
+[ ] 1. Generate and Verify All Keys
+    - Generate MAINNET_DEPLOYER_SECRET_KEY (single-use, will discard)
+      Command: stellar keys generate
+    - Verify MAINNET_OWNER_ADDRESS is in hardware wallet or multisig
+    - Verify MAINNET_AGENT_ADDRESS is securely stored (AWS Secrets Manager, etc.)
+    - Keys should NOT be the same (least-privilege principle)
+
+[ ] 2. Verify Addresses on Official Sources
+    - Confirm MAINNET_USDC_TOKEN_ADDRESS on Stellar Expert
+    - Confirm MAINNET_BLEND_POOL_ADDRESS on Blend Protocol docs + Stellar Expert
+    - Optional: Confirm MAINNET_DEX_POOL_ADDRESS if using liquidity strategy
+    - Document sources and dates of verification
+
+[ ] 3. Verify WASM Contract
+    - Build contract: cd neurowealth-vault && cargo build --release --target wasm32-unknown-unknown
+    - Compute hash: sha256sum neurowealth-vault/contracts/vault/target/wasm32-unknown-unknown/release/neurowealth_vault.wasm
+    - Copy hash to MAINNET_WASM_HASH in .env.mainnet
+    - Security: Have a second team member independently verify hash
+
+[ ] 4. Fund Deployer Account
+    - Send ~2 XLM to MAINNET_DEPLOYER_SECRET_KEY address
+    - Verify balance: stellar account balance --source <deployer-address>
+
+[ ] 5. Run All Unit Tests Locally
+    - cd neurowealth-vault
+    - cargo test --release
+    - Verify 100% pass rate before proceeding
+
+[ ] 6. Team Review & Sign-off
+    - Have ≥2 team members review MAINNET configuration
+    - Document reviewer names and dates
+    - Ensure all caps and pool addresses are correct
+
+================================================================================
+DRY-RUN PHASE (Test configuration without submitting transactions)
+================================================================================
+
+[ ] 1. Prepare Configuration File
+    - Copy: cp .env.mainnet.template .env.mainnet
+    - Edit: source ~/.bashrc && nano .env.mainnet
+    - Fill ALL required fields (see template for descriptions)
+    - NEVER commit .env.mainnet to git (should be in .gitignore)
+    - Verify: grep -v "^#" .env.mainnet | grep -v "^$"
+
+[ ] 2. Load Environment
+    - Command: source .env.mainnet
+
+[ ] 3. Run Dry-Run Deployment
+    - Command: ./scripts/deploy-mainnet.sh --dry-run
+    - Output will show:
+      * Configuration validation ✓
+      * All parameters ✓
+      * Network connectivity ✓
+      * WASM hash verification ✓
+      * Simulated deployment steps (no real transactions)
+    - If ANY check fails: STOP, fix configuration, rerun dry-run
+
+[ ] 4. Verify All Safety Checks Pass
+    - Review output for:
+      ✓ WASM hash verified
+      ✓ All addresses valid
+      ✓ All caps valid
+      ✓ Owner ≠ Agent
+      ✓ RPC connectivity OK
+    - Document screenshot/log for audit trail
+
+[ ] 5. Team Final Review
+    - Have 2 team members review dry-run output
+    - Confirm all values are correct
+    - Sign off before proceeding to production deployment
+
+================================================================================
+PRODUCTION DEPLOYMENT PHASE
+================================================================================
+
+[ ] 1. Final Pre-Deployment Checks
+    - Confirm deployer account has XLM balance
+    - Confirm Owner address is ready (multisig signers available)
+    - Confirm no production incidents or market instability
+    - Check Stellar network status: https://status.stellar.org/
+
+[ ] 2. Production Deployment (MAINNET)
+    - Command: ./scripts/deploy-mainnet.sh
+    - You will be prompted:
+      "Type 'DEPLOY TO MAINNET' to confirm:"
+    - Type exactly: DEPLOY TO MAINNET
+    - This action CANNOT be undone
+
+[ ] 3. Monitor Deployment
+    - Watch output for each step:
+      1. Deploy contract (30-60 seconds)
+      2. Initialize vault
+      3. Set capabilities
+      4. Configure pools
+      5. Configure operational settings
+    - Each step shows transaction hash
+    - Save transaction hashes for audit trail
+    - Deployment log saved to: scripts/mainnet-deployment.log
+
+[ ] 4. Verify Deployment Success
+    - Check for "Deployment process complete" message
+    - Verify deployment artifacts: scripts/mainnet-deployment-artifacts.json
+    - Save artifacts file to secure location (audit trail)
+    - Document vault contract ID (CABC...)
+
+================================================================================
+POST-DEPLOYMENT VERIFICATION PHASE
+================================================================================
+
+[ ] 1. Run Comprehensive Verification Script
+    - Export verification environment variables:
+      export VAULT_CONTRACT_ID="C..."
+      export OWNER_ADDRESS="G..."
+      export AGENT_ADDRESS="G..."
+      export AGENT_SECRET_KEY="S..."
+      export USDC_TOKEN_ADDRESS="C..."
+      export EXPECTED_TVL_CAP="..."
+      export EXPECTED_USER_DEPOSIT_CAP="..."
+      export EXPECTED_MIN_DEPOSIT="..."
+      export EXPECTED_MAX_DEPOSIT="..."
+      export BLEND_POOL_ADDRESS="C..."
+
+    - Command: ./scripts/verify-mainnet-deployment.sh
+    - All 10 checks must PASS:
+      ✓ Key separation
+      ✓ Contract owner
+      ✓ Contract agent
+      ✓ USDC token
+      ✓ TVL cap
+      ✓ User cap
+      ✓ Deposit limits
+      ✓ Blend pool
+      ✓ DEX pool (optional)
+      ✓ Pause/unpause drill (optional)
+
+[ ] 2. Test Pause Drill (if enabled)
+    - Vault will be paused and unpaused on mainnet
+    - Verify:
+      * is_paused() returns true after pause
+      * is_paused() returns false after unpause
+      * All operations blocked during pause
+    - This is a critical safety test
+
+[ ] 3. Manual Verification (Explorer)
+    - Open Stellar Expert: https://stellar.expert/explorer/public/contract/<VAULT_CONTRACT_ID>
+    - Verify on-chain state:
+      * get_owner = MAINNET_OWNER_ADDRESS
+      * get_agent = MAINNET_AGENT_ADDRESS
+      * get_tvl_cap = MAINNET_TVL_CAP
+      * get_user_deposit_cap = MAINNET_USER_DEPOSIT_CAP
+      * get_blend_pool = MAINNET_BLEND_POOL_ADDRESS
+
+[ ] 4. Test Small Deposit (Optional)
+    - Make small test deposit: 1 USDC
+    - Verify:
+      * Transaction succeeds
+      * get_balance() increases
+      * get_shares() > 0
+      * Exchange rate is reasonable
+    - If successful: vault is operational
+
+[ ] 5. Document Deployment
+    - Record in production deployment log:
+      * Date/time of deployment
+      * Vault contract ID
+      * All transaction hashes
+      * Team members involved
+      * Any issues encountered
+      * Sign-off from lead engineer
+
+================================================================================
+ROLLBACK PROCEDURE (If Critical Issue Found)
+================================================================================
+
+SCENARIO: Deployment completed but critical flaw discovered
+
+STEPS:
+[ ] 1. Immediately PAUSE vault via owner address
+    - Command: stellar contract invoke --id C... --source owner -- pause
+
+[ ] 2. Notify all stakeholders
+    - Post incident alert
+    - Notify users of pause reason
+
+[ ] 3. Investigate root cause
+    - Review deployment logs
+    - Check contract state via Stellar Expert
+    - Identify fix required
+
+[ ] 4. Prepare fix (if contract code issue)
+    - Fix code in Rust
+    - Build new WASM
+    - Compute new WASM hash
+    - Verify hash independently
+
+[ ] 5. Schedule upgrade via timelock
+    - Command: stellar contract invoke ... -- schedule_upgrade --new_wasm_hash <NEW_HASH>
+    - This starts 24-hour timelock
+    - Cannot be executed before timelock expires
+
+[ ] 6. Wait 24 hours (17,280 ledgers)
+    - Monitor: stellar contract invoke ... -- get_pending_upgrade
+    - NO changes can be made during timelock window
+    - This provides transparency and cancellation window
+
+[ ] 7. Execute upgrade after timelock expires
+    - Command: stellar contract invoke ... -- execute_upgrade
+    - Contract code updated to fixed version
+    - Storage state preserved during upgrade
+
+[ ] 8. Verify upgrade
+    - Run verification script again
+    - Confirm all tests pass
+    - UNPAUSE vault
+
+[ ] 9. Post-incident review
+    - Document what went wrong
+    - Identify process improvements
+    - Update checklists/runbooks
+
+================================================================================
+EMERGENCY CONTACTS & ESCALATION
+================================================================================
+
+Critical Issues During Deployment:
+- Immediate: #incidents channel in Slack
+- Escalation: @neurowealth-core
+- External: stellar-core@stellar.org (if Stellar network issue)
+
+24-Hour Pause Response Team:
+- On-call: (see internal wiki)
+- Backup: (see internal wiki)
+
+================================================================================
+POST-DEPLOYMENT MONITORING
+================================================================================
+
+Weekly:
+[ ] Check contract events (deposits, withdrawals, rebalances)
+[ ] Monitor TVL growth relative to cap
+[ ] Review error logs and event processing
+
+Monthly:
+[ ] Audit all administrative operations
+[ ] Review and approve any pending upgrades/agent updates
+[ ] Verify USDC reserves match on-chain accounting
+[ ] Check for any security incidents
+
+Critical Alerts (Set Up):
+- TVL approaching cap (>90%)
+- Pause event triggered
+- Upgrade timelock scheduled
+- Agent update proposed
+- Unusual rebalance frequency
+
+================================================================================
+SIGN-OFF
+================================================================================
+
+Deployment completed by: _______________  Date: __________
+
+Verified by: _______________  Date: __________
+
+Lead approval: _______________  Date: __________
+
+Vault Contract ID (for records): C_______________________
+
+Deployment was:  [ ] Successful  [ ] Rolled back (reason: __________)
+
+================================================================================

@@ -18,28 +18,23 @@
         },
         {
           "name": "deployer",
-          "type": "Address",
-          "description": "Deployer keypair address for signature verification"
+          "type": "Address"
         },
         {
           "name": "owner",
-          "type": "Address",
-          "description": "Contract owner address"
+          "type": "Address"
         },
         {
           "name": "agent",
-          "type": "Address",
-          "description": "Authorized AI agent address"
+          "type": "Address"
         },
         {
           "name": "usdc_token",
-          "type": "Address",
-          "description": "USDC token contract address"
+          "type": "Address"
         },
         {
           "name": "salt",
-          "type": "BytesN<32>",
-          "description": "32-byte salt for deployment verification"
+          "type": "BytesN<32>"
         }
       ],
       "returns": null,
@@ -65,13 +60,11 @@
         },
         {
           "name": "user",
-          "type": "Address",
-          "description": "User depositing USDC"
+          "type": "Address"
         },
         {
           "name": "amount",
-          "type": "i128",
-          "description": "Amount of USDC to deposit (in base units, 7 decimals)"
+          "type": "i128"
         }
       ],
       "returns": null,
@@ -104,19 +97,14 @@
         },
         {
           "name": "user",
-          "type": "Address",
-          "description": "User withdrawing USDC"
+          "type": "Address"
         },
         {
           "name": "amount",
-          "type": "i128",
-          "description": "Amount of USDC to withdraw (in base units)"
+          "type": "i128"
         }
       ],
-      "returns": {
-        "type": "i128",
-        "description": "Amount of USDC returned to user"
-      },
+      "returns": null,
       "requires_auth": true,
       "state_changing": true,
       "constraints": [
@@ -141,14 +129,10 @@
         },
         {
           "name": "user",
-          "type": "Address",
-          "description": "User withdrawing all funds"
+          "type": "Address"
         }
       ],
-      "returns": {
-        "type": "i128",
-        "description": "Total amount of USDC withdrawn"
-      },
+      "returns": "i128",
       "requires_auth": true,
       "state_changing": true,
       "events": [
@@ -167,23 +151,19 @@
         },
         {
           "name": "protocol",
-          "type": "Symbol",
-          "description": "Target protocol: \"blend\" (Blend lending) or \"none\" (no deployment)"
+          "type": "Symbol"
         },
         {
           "name": "expected_apy",
-          "type": "i128",
-          "description": "Expected APY from target protocol (in basis points * 10^7)"
+          "type": "i128"
         },
         {
           "name": "min_out",
-          "type": "i128",
-          "description": "Minimum output amount (slippage protection)"
+          "type": "i128"
         }
       ],
       "returns": null,
       "requires_auth": true,
-      "authorized_caller": "agent",
       "state_changing": true,
       "events": [
         "RebalanceEvent"
@@ -193,6 +173,7 @@
         "blend",
         "none"
       ],
+      "authorized_caller": "agent",
       "notes": [
         "Performs slippage check against min_out parameter"
       ]
@@ -209,8 +190,7 @@
         },
         {
           "name": "owner",
-          "type": "Address",
-          "description": "Contract owner"
+          "type": "Address"
         }
       ],
       "returns": null,
@@ -232,8 +212,7 @@
         },
         {
           "name": "owner",
-          "type": "Address",
-          "description": "Contract owner"
+          "type": "Address"
         }
       ],
       "returns": null,
@@ -255,8 +234,7 @@
         },
         {
           "name": "owner",
-          "type": "Address",
-          "description": "Contract owner"
+          "type": "Address"
         }
       ],
       "returns": null,
@@ -278,8 +256,7 @@
         },
         {
           "name": "cap",
-          "type": "i128",
-          "description": "New TVL cap in base units"
+          "type": "i128"
         }
       ],
       "returns": null,
@@ -301,8 +278,7 @@
         },
         {
           "name": "cap",
-          "type": "i128",
-          "description": "New per-user deposit cap in base units"
+          "type": "i128"
         }
       ],
       "returns": null,
@@ -324,13 +300,11 @@
         },
         {
           "name": "user_deposit_cap",
-          "type": "i128",
-          "description": "New per-user deposit cap"
+          "type": "i128"
         },
         {
           "name": "tvl_cap",
-          "type": "i128",
-          "description": "New total TVL cap"
+          "type": "i128"
         }
       ],
       "returns": null,
@@ -344,39 +318,10 @@
       ]
     },
     {
-      "name": "set_deposit_limits",
-      "category": "administration",
-      "access": "owner-only",
-      "description": "Set minimum and maximum per-transaction deposit limits",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        },
-        {
-          "name": "min",
-          "type": "i128",
-          "description": "Minimum deposit per transaction"
-        },
-        {
-          "name": "max",
-          "type": "i128",
-          "description": "Maximum deposit per transaction"
-        }
-      ],
-      "returns": null,
-      "requires_auth": true,
-      "state_changing": true,
-      "events": [
-        "LimitsUpdatedEvent"
-      ]
-    },
-    {
       "name": "set_limits",
       "category": "administration",
       "access": "owner-only",
       "description": "DEPRECATED: Use set_caps or set_deposit_limits instead",
-      "deprecated": true,
       "parameters": [
         {
           "name": "env",
@@ -396,7 +341,237 @@
       "state_changing": true,
       "notes": [
         "This function is deprecated and may be removed in future versions"
+      ],
+      "deprecated": true
+    },
+    {
+      "name": "set_deposit_limits",
+      "category": "administration",
+      "access": "owner-only",
+      "description": "Set minimum and maximum per-transaction deposit limits",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "min",
+          "type": "i128"
+        },
+        {
+          "name": "max",
+          "type": "i128"
+        }
+      ],
+      "returns": null,
+      "requires_auth": true,
+      "state_changing": true,
+      "events": [
+        "LimitsUpdatedEvent"
       ]
+    },
+    {
+      "name": "set_rebalance_cooldown",
+      "category": "administration",
+      "access": "owner-only",
+      "description": "Set minimum ledgers between rebalance calls (0 = no cooldown)",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "interval",
+          "type": "u32"
+        }
+      ],
+      "returns": null,
+      "requires_auth": true,
+      "state_changing": true
+    },
+    {
+      "name": "get_rebalance_cooldown",
+      "category": "queries",
+      "access": "public",
+      "description": "Get the minimum ledger interval between rebalances",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "u32",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "instance",
+      "query_only": true
+    },
+    {
+      "name": "get_last_rebalance_ledger",
+      "category": "queries",
+      "access": "public",
+      "description": "Get the ledger sequence of the last successful rebalance",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "u32",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "instance",
+      "query_only": true
+    },
+    {
+      "name": "set_approval_ttl",
+      "category": "administration",
+      "access": "owner-only",
+      "description": "Set the ledger TTL for token approvals (alias for set_blend_approval_ttl)",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "ttl",
+          "type": "u32"
+        }
+      ],
+      "returns": null,
+      "requires_auth": true,
+      "state_changing": true
+    },
+    {
+      "name": "get_approval_ttl",
+      "category": "queries",
+      "access": "public",
+      "description": "Get the configured token approval TTL in ledgers",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "u32",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "instance",
+      "query_only": true
+    },
+    {
+      "name": "get_tvl_cap",
+      "category": "queries",
+      "access": "public",
+      "description": "Get current TVL cap",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "i128",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "instance",
+      "query_only": true
+    },
+    {
+      "name": "get_user_deposit_cap",
+      "category": "queries",
+      "access": "public",
+      "description": "Get current per-user deposit cap",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "i128",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "instance",
+      "query_only": true
+    },
+    {
+      "name": "get_min_deposit",
+      "category": "queries",
+      "access": "public",
+      "description": "Get minimum deposit amount per transaction",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "i128",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "instance",
+      "query_only": true
+    },
+    {
+      "name": "get_max_deposit",
+      "category": "queries",
+      "access": "public",
+      "description": "Get maximum deposit amount per transaction",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "i128",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "instance",
+      "query_only": true
+    },
+    {
+      "name": "set_user_strategy",
+      "category": "management",
+      "access": "public",
+      "description": "Set a user's strategy choice",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "user",
+          "type": "Address"
+        },
+        {
+          "name": "strategy",
+          "type": "Symbol"
+        }
+      ],
+      "returns": null,
+      "requires_auth": true,
+      "state_changing": true,
+      "events": [
+        "UserStrategyUpdatedEvent"
+      ]
+    },
+    {
+      "name": "get_user_strategy",
+      "category": "queries",
+      "access": "public",
+      "description": "Get a user's strategy choice",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "user",
+          "type": "Address"
+        }
+      ],
+      "returns": "Symbol",
+      "requires_auth": false,
+      "state_changing": false,
+      "query_only": true
     },
     {
       "name": "update_agent",
@@ -410,8 +585,7 @@
         },
         {
           "name": "new_agent",
-          "type": "Address",
-          "description": "New agent address"
+          "type": "Address"
         }
       ],
       "returns": null,
@@ -422,54 +596,57 @@
       ]
     },
     {
-      "name": "transfer_ownership",
+      "name": "confirm_agent_update",
       "category": "administration",
       "access": "owner-only",
-      "description": "Initiate two-step ownership transfer (new owner must call accept_ownership)",
+      "description": "Confirm a proposed agent update after the timelock has elapsed",
       "parameters": [
         {
           "name": "env",
           "type": "Env"
-        },
-        {
-          "name": "new_owner",
-          "type": "Address",
-          "description": "Address of new owner"
         }
       ],
       "returns": null,
       "requires_auth": true,
       "state_changing": true,
       "events": [
-        "OwnershipTransferInitiatedEvent"
-      ],
-      "notes": [
-        "Two-step process prevents accidental ownership loss",
-        "New owner must accept within timeframe"
+        "AgentUpdateConfirmedEvent",
+        "AgentUpdatedEvent"
       ]
     },
     {
-      "name": "accept_ownership",
+      "name": "cancel_agent_update",
       "category": "administration",
-      "access": "pending-owner-only",
-      "description": "Accept ownership transfer (must be called by pending owner)",
+      "access": "owner-only",
+      "description": "Cancel a pending proposed agent update",
       "parameters": [
         {
           "name": "env",
           "type": "Env"
-        },
-        {
-          "name": "new_owner",
-          "type": "Address",
-          "description": "Pending owner address"
         }
       ],
       "returns": null,
       "requires_auth": true,
       "state_changing": true,
       "events": [
-        "OwnershipTransferredEvent"
+        "AgentUpdateCancelledEvent"
       ]
+    },
+    {
+      "name": "get_pending_agent_update",
+      "category": "queries",
+      "access": "public",
+      "description": "Get the pending proposed agent address and effective ledger",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "Option<(Address, u32)>",
+      "requires_auth": false,
+      "state_changing": false,
+      "query_only": true
     },
     {
       "name": "set_blend_pool",
@@ -487,8 +664,7 @@
         },
         {
           "name": "pool_address",
-          "type": "Address",
-          "description": "Blend pool contract address"
+          "type": "Address"
         }
       ],
       "returns": null,
@@ -514,8 +690,7 @@
         },
         {
           "name": "pool_address",
-          "type": "Address",
-          "description": "DEX pool contract address"
+          "type": "Address"
         }
       ],
       "returns": null,
@@ -541,8 +716,7 @@
         },
         {
           "name": "blend_approval_ttl",
-          "type": "u32",
-          "description": "TTL in ledgers for Blend allowance approvals"
+          "type": "u32"
         }
       ],
       "returns": null,
@@ -550,44 +724,52 @@
       "state_changing": true
     },
     {
-      "name": "set_approval_ttl",
+      "name": "transfer_ownership",
       "category": "administration",
       "access": "owner-only",
-      "description": "Set the ledger TTL for token approvals (alias for set_blend_approval_ttl)",
+      "description": "Initiate two-step ownership transfer (new owner must call accept_ownership)",
       "parameters": [
         {
           "name": "env",
           "type": "Env"
         },
         {
-          "name": "ttl",
-          "type": "u32",
-          "description": "TTL in ledgers for token allowance approvals"
+          "name": "new_owner",
+          "type": "Address"
         }
       ],
       "returns": null,
       "requires_auth": true,
-      "state_changing": true
+      "state_changing": true,
+      "events": [
+        "OwnershipTransferInitiatedEvent"
+      ],
+      "notes": [
+        "Two-step process prevents accidental ownership loss",
+        "New owner must accept within timeframe"
+      ]
     },
     {
-      "name": "set_rebalance_cooldown",
+      "name": "accept_ownership",
       "category": "administration",
-      "access": "owner-only",
-      "description": "Set minimum ledgers between rebalance calls (0 = no cooldown)",
+      "access": "pending-owner-only",
+      "description": "Accept ownership transfer (must be called by pending owner)",
       "parameters": [
         {
           "name": "env",
           "type": "Env"
         },
         {
-          "name": "interval",
-          "type": "u32",
-          "description": "Minimum ledger interval between rebalances"
+          "name": "new_owner",
+          "type": "Address"
         }
       ],
       "returns": null,
       "requires_auth": true,
-      "state_changing": true
+      "state_changing": true,
+      "events": [
+        "OwnershipTransferredEvent"
+      ]
     },
     {
       "name": "cancel_ownership_transfer",
@@ -608,6 +790,23 @@
       ]
     },
     {
+      "name": "get_pending_owner",
+      "category": "queries",
+      "access": "public",
+      "description": "Get pending owner address if transfer in progress",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "Option<Address>",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "instance",
+      "query_only": true
+    },
+    {
       "name": "update_total_assets",
       "category": "management",
       "access": "agent-only",
@@ -619,32 +818,28 @@
         },
         {
           "name": "agent",
-          "type": "Address",
-          "description": "AI agent address"
+          "type": "Address"
         },
         {
           "name": "new_total",
-          "type": "i128",
-          "description": "New total assets value"
+          "type": "i128"
         },
         {
           "name": "allow_decrease",
-          "type": "bool",
-          "description": "Allow total to decrease"
+          "type": "bool"
         },
         {
           "name": "max_decrease_bps",
-          "type": "u32",
-          "description": "Maximum decrease in basis points"
+          "type": "u32"
         }
       ],
       "returns": null,
       "requires_auth": true,
-      "authorized_caller": "agent",
       "state_changing": true,
       "events": [
         "AssetsUpdatedEvent"
       ],
+      "authorized_caller": "agent",
       "notes": [
         "Only agent can call",
         "Decreases require owner co-signature",
@@ -652,10 +847,10 @@
       ]
     },
     {
-      "name": "upgrade",
+      "name": "schedule_upgrade",
       "category": "administration",
       "access": "owner-only",
-      "description": "Upgrade contract code to new WASM",
+      "description": "Schedule a contract WASM code upgrade by hash, initiating the timelock window",
       "parameters": [
         {
           "name": "env",
@@ -667,8 +862,29 @@
         },
         {
           "name": "new_wasm_hash",
-          "type": "BytesN<32>",
-          "description": "SHA256 hash of new WASM code"
+          "type": "BytesN<32>"
+        }
+      ],
+      "returns": null,
+      "requires_auth": true,
+      "state_changing": true,
+      "events": [
+        "UpgradeScheduledEvent"
+      ]
+    },
+    {
+      "name": "execute_upgrade",
+      "category": "administration",
+      "access": "owner-only",
+      "description": "Execute a scheduled contract WASM code upgrade after the timelock has elapsed",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "owner",
+          "type": "Address"
         }
       ],
       "returns": null,
@@ -676,11 +892,45 @@
       "state_changing": true,
       "events": [
         "UpgradedEvent"
-      ],
-      "notes": [
-        "Preserves all state during upgrade",
-        "Version counter increments automatically"
       ]
+    },
+    {
+      "name": "cancel_upgrade",
+      "category": "administration",
+      "access": "owner-only",
+      "description": "Cancel a pending contract code upgrade proposal",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "owner",
+          "type": "Address"
+        }
+      ],
+      "returns": null,
+      "requires_auth": true,
+      "state_changing": true,
+      "events": [
+        "UpgradeCancelledEvent"
+      ]
+    },
+    {
+      "name": "get_pending_upgrade",
+      "category": "queries",
+      "access": "public",
+      "description": "Get the pending proposed upgrade WASM hash and effective ledger",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "Option<(BytesN<32>, u32)>",
+      "requires_auth": false,
+      "state_changing": false,
+      "query_only": true
     },
     {
       "name": "get_balance",
@@ -776,17 +1026,159 @@
       "query_only": true
     },
     {
-      "name": "get_exchange_rate",
+      "name": "touch_user_ttl",
       "category": "queries",
       "access": "public",
-      "description": "Get current exchange rate (assets per share * 10^7)",
+      "description": "Extend persistent TTL for user shares entry",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "user",
+          "type": "Address"
+        }
+      ],
+      "returns": "bool",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "persistent",
+      "query_only": true
+    },
+    {
+      "name": "get_user_info",
+      "category": "queries",
+      "access": "public",
+      "description": "Get complete user information and statistics",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "user",
+          "type": "Address"
+        }
+      ],
+      "returns": "UserInfo",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "mixed",
+      "query_only": true
+    },
+    {
+      "name": "preview_deposit_to_shares",
+      "category": "queries",
+      "access": "public",
+      "description": "Preview shares minted for asset amount (floor)",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "assets",
+          "type": "i128"
+        }
+      ],
+      "returns": "i128",
+      "requires_auth": false,
+      "state_changing": false,
+      "query_only": true
+    },
+    {
+      "name": "preview_shares_to_assets",
+      "category": "queries",
+      "access": "public",
+      "description": "Preview assets returned for share amount (floor)",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "shares",
+          "type": "i128"
+        }
+      ],
+      "returns": "i128",
+      "requires_auth": false,
+      "state_changing": false,
+      "query_only": true
+    },
+    {
+      "name": "preview_withdraw",
+      "category": "queries",
+      "access": "public",
+      "description": "Preview shares burned for withdrawal amount (ceil)",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "assets",
+          "type": "i128"
+        }
+      ],
+      "returns": "i128",
+      "requires_auth": false,
+      "state_changing": false,
+      "query_only": true
+    },
+    {
+      "name": "convert_to_shares",
+      "category": "queries",
+      "access": "public",
+      "description": "Convert asset amount to shares (floor)",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "assets",
+          "type": "i128"
+        }
+      ],
+      "returns": "i128",
+      "requires_auth": false,
+      "state_changing": false,
+      "query_only": true
+    },
+    {
+      "name": "convert_to_assets",
+      "category": "queries",
+      "access": "public",
+      "description": "Convert share amount to assets (floor)",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        },
+        {
+          "name": "shares",
+          "type": "i128"
+        }
+      ],
+      "returns": "i128",
+      "requires_auth": false,
+      "state_changing": false,
+      "query_only": true
+    },
+    {
+      "name": "get_agent",
+      "category": "queries",
+      "access": "public",
+      "description": "Get authorized AI agent address",
       "parameters": [
         {
           "name": "env",
           "type": "Env"
         }
       ],
-      "returns": "i128",
+      "returns": "Address",
       "requires_auth": false,
       "state_changing": false,
       "storage_type": "instance",
@@ -810,34 +1202,17 @@
       "query_only": true
     },
     {
-      "name": "get_agent",
+      "name": "is_paused",
       "category": "queries",
       "access": "public",
-      "description": "Get authorized AI agent address",
+      "description": "Check if vault is paused",
       "parameters": [
         {
           "name": "env",
           "type": "Env"
         }
       ],
-      "returns": "Address",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "instance",
-      "query_only": true
-    },
-    {
-      "name": "get_usdc_token",
-      "category": "queries",
-      "access": "public",
-      "description": "Get USDC token contract address",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        }
-      ],
-      "returns": "Address",
+      "returns": "bool",
       "requires_auth": false,
       "state_changing": false,
       "storage_type": "instance",
@@ -855,6 +1230,23 @@
         }
       ],
       "returns": "u32",
+      "requires_auth": false,
+      "state_changing": false,
+      "storage_type": "instance",
+      "query_only": true
+    },
+    {
+      "name": "get_usdc_token",
+      "category": "queries",
+      "access": "public",
+      "description": "Get USDC token contract address",
+      "parameters": [
+        {
+          "name": "env",
+          "type": "Env"
+        }
+      ],
+      "returns": "Address",
       "requires_auth": false,
       "state_changing": false,
       "storage_type": "instance",
@@ -895,255 +1287,6 @@
       "query_only": true
     },
     {
-      "name": "get_tvl_cap",
-      "category": "queries",
-      "access": "public",
-      "description": "Get current TVL cap",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        }
-      ],
-      "returns": "i128",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "instance",
-      "query_only": true
-    },
-    {
-      "name": "get_user_deposit_cap",
-      "category": "queries",
-      "access": "public",
-      "description": "Get current per-user deposit cap",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        }
-      ],
-      "returns": "i128",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "instance",
-      "query_only": true
-    },
-    {
-      "name": "get_min_deposit",
-      "category": "queries",
-      "access": "public",
-      "description": "Get minimum deposit amount per transaction",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        }
-      ],
-      "returns": "i128",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "instance",
-      "query_only": true
-    },
-    {
-      "name": "get_max_deposit",
-      "category": "queries",
-      "access": "public",
-      "description": "Get maximum deposit amount per transaction",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        }
-      ],
-      "returns": "i128",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "instance",
-      "query_only": true
-    },
-    {
-      "name": "get_pending_owner",
-      "category": "queries",
-      "access": "public",
-      "description": "Get pending owner address if transfer in progress",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        }
-      ],
-      "returns": "Option<Address>",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "instance",
-      "query_only": true
-    },
-    {
-      "name": "get_user_info",
-      "category": "queries",
-      "access": "public",
-      "description": "Get complete user information and statistics",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        },
-        {
-          "name": "user",
-          "type": "Address"
-        }
-      ],
-      "returns": "UserInfo",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "mixed",
-      "query_only": true
-    },
-    {
-      "name": "is_paused",
-      "category": "queries",
-      "access": "public",
-      "description": "Check if vault is paused",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        }
-      ],
-      "returns": "bool",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "instance",
-      "query_only": true
-    },
-    {
-      "name": "touch_user_ttl",
-      "category": "queries",
-      "access": "public",
-      "description": "Extend persistent TTL for user shares entry",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        },
-        {
-          "name": "user",
-          "type": "Address"
-        }
-      ],
-      "returns": "bool",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "persistent",
-      "query_only": true
-    },
-    {
-      "name": "preview_deposit_to_shares",
-      "category": "queries",
-      "access": "public",
-      "description": "Preview shares minted for asset amount (floor)",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        },
-        {
-          "name": "assets",
-          "type": "Address"
-        }
-      ],
-      "returns": "i128",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "query",
-      "query_only": true
-    },
-    {
-      "name": "preview_shares_to_assets",
-      "category": "queries",
-      "access": "public",
-      "description": "Preview assets returned for share amount (floor)",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        },
-        {
-          "name": "shares",
-          "type": "Address"
-        }
-      ],
-      "returns": "i128",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "query",
-      "query_only": true
-    },
-    {
-      "name": "preview_withdraw",
-      "category": "queries",
-      "access": "public",
-      "description": "Preview shares burned for withdrawal amount (ceil)",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        },
-        {
-          "name": "assets",
-          "type": "Address"
-        }
-      ],
-      "returns": "i128",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "query",
-      "query_only": true
-    },
-    {
-      "name": "convert_to_shares",
-      "category": "queries",
-      "access": "public",
-      "description": "Convert asset amount to shares (floor)",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        },
-        {
-          "name": "assets",
-          "type": "Address"
-        }
-      ],
-      "returns": "i128",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "query",
-      "query_only": true
-    },
-    {
-      "name": "convert_to_assets",
-      "category": "queries",
-      "access": "public",
-      "description": "Convert share amount to assets (floor)",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        },
-        {
-          "name": "shares",
-          "type": "Address"
-        }
-      ],
-      "returns": "i128",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "query",
-      "query_only": true
-    },
-    {
       "name": "get_dex_pool",
       "category": "queries",
       "access": "public",
@@ -1178,51 +1321,17 @@
       "query_only": true
     },
     {
-      "name": "get_approval_ttl",
+      "name": "get_exchange_rate",
       "category": "queries",
       "access": "public",
-      "description": "Get the configured token approval TTL in ledgers",
+      "description": "Get current exchange rate (assets per share * 10^7)",
       "parameters": [
         {
           "name": "env",
           "type": "Env"
         }
       ],
-      "returns": "u32",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "instance",
-      "query_only": true
-    },
-    {
-      "name": "get_rebalance_cooldown",
-      "category": "queries",
-      "access": "public",
-      "description": "Get the minimum ledger interval between rebalances",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        }
-      ],
-      "returns": "u32",
-      "requires_auth": false,
-      "state_changing": false,
-      "storage_type": "instance",
-      "query_only": true
-    },
-    {
-      "name": "get_last_rebalance_ledger",
-      "category": "queries",
-      "access": "public",
-      "description": "Get the ledger sequence of the last successful rebalance",
-      "parameters": [
-        {
-          "name": "env",
-          "type": "Env"
-        }
-      ],
-      "returns": "u32",
+      "returns": "i128",
       "requires_auth": false,
       "state_changing": false,
       "storage_type": "instance",
@@ -1282,418 +1391,709 @@
   ],
   "events": [
     {
-      "name": "VaultInitializedEvent",
-      "topic": "init",
-      "description": "Emitted when vault is initialized",
+      "name": "DepositEvent",
+      "topic": "unknown",
+      "description": "Emitted by the contract.",
       "fields": [
         {
-          "name": "owner",
+          "name": "user",
           "type": "Address",
-          "description": "Contract owner"
+          "description": "The user who made the deposit"
         },
         {
-          "name": "agent",
-          "type": "Address",
-          "description": "AI agent address"
-        },
-        {
-          "name": "usdc_token",
-          "type": "Address",
-          "description": "USDC token address"
-        },
-        {
-          "name": "tvl_cap",
+          "name": "amount",
           "type": "i128",
-          "description": "Initial TVL cap"
+          "description": "Amount of USDC deposited (7 decimal places)"
+        },
+        {
+          "name": "shares",
+          "type": "i128",
+          "description": "Number of vault shares minted for this deposit"
         }
       ]
     },
     {
-      "name": "DepositEvent",
-      "topic": "deposit",
-      "description": "Emitted when user deposits USDC",
-      "fields": [
-        {
-          "name": "user",
-          "type": "Address",
-          "indexed": true,
-          "description": "User address"
-        },
-        {
-          "name": "amount",
-          "type": "i128",
-          "description": "USDC amount deposited"
-        },
-        {
-          "name": "shares",
-          "type": "i128",
-          "description": "Vault shares minted"
-        }
-      ],
-      "listener": "AI agent monitors this to detect deposits and deploy funds"
-    },
-    {
       "name": "WithdrawEvent",
-      "topic": "withdraw",
-      "description": "Emitted when user withdraws USDC",
+      "topic": "unknown",
+      "description": "Emitted by the contract.",
       "fields": [
         {
           "name": "user",
           "type": "Address",
-          "indexed": true
+          "description": "The user who made the withdrawal"
         },
         {
           "name": "amount",
           "type": "i128",
-          "description": "USDC amount withdrawn"
+          "description": "Amount of USDC withdrawn (7 decimal places)"
         },
         {
           "name": "shares",
           "type": "i128",
-          "description": "Vault shares burned"
+          "description": "Number of vault shares burned for this withdrawal"
         }
       ]
     },
     {
       "name": "RebalanceEvent",
       "topic": "rebalance",
-      "description": "Emitted when agent rebalances funds between protocols",
+      "description": "Emitted by the contract.",
       "fields": [
         {
           "name": "protocol",
           "type": "Symbol",
-          "indexed": true,
-          "description": "Target protocol"
+          "description": "The target protocol (supported: \"blend\", \"none\")"
         },
         {
           "name": "expected_apy",
           "type": "i128",
-          "description": "Expected APY"
+          "description": "Expected APY in basis points (e.g., 850 = 8.5%)"
         },
         {
-          "name": "min_out",
+          "name": "status",
+          "type": "Symbol",
+          "description": "Status: \"success\", \"failed\", \"partial\", or \"noop\" (no funds moved)"
+        },
+        {
+          "name": "amount_attempted",
           "type": "i128",
-          "description": "Minimum output"
+          "description": "Amount attempted to be moved"
+        },
+        {
+          "name": "amount_moved",
+          "type": "i128",
+          "description": "Amount actually moved"
+        },
+        {
+          "name": "amount_supplied",
+          "type": "i128",
+          "description": "Amount supplied into the target protocol"
+        },
+        {
+          "name": "amount_withdrawn",
+          "type": "i128",
+          "description": "Amount withdrawn from the current protocol"
         }
       ]
     },
     {
       "name": "ProtocolChangedEvent",
-      "topic": "protocol_changed",
-      "description": "Emitted when the current yield protocol is changed",
+      "topic": "proto_chg",
+      "description": "Emitted by the contract.",
       "fields": [
+        {
+          "name": "old_protocol",
+          "type": "Symbol",
+          "description": "Protocol the vault was deployed to before the change (`\"blend\"`, `\"dex\"`, or `\"none\"`)"
+        },
         {
           "name": "new_protocol",
           "type": "Symbol",
-          "description": "New protocol symbol"
+          "description": "Protocol the vault is deployed to after the change (`\"blend\"`, `\"dex\"`, or `\"none\"`)"
         }
       ]
     },
     {
       "name": "PauseEvent",
       "topic": "pause_event",
-      "description": "Legacy pause event"
-    },
-    {
-      "name": "VaultPausedEvent",
-      "topic": "paused",
-      "description": "Emitted when vault operations are paused"
-    },
-    {
-      "name": "VaultUnpausedEvent",
-      "topic": "unpaused",
-      "description": "Emitted when vault operations resume"
-    },
-    {
-      "name": "EmergencyPausedEvent",
-      "topic": "emergency_pause",
-      "description": "Emitted when emergency pause is triggered"
-    },
-    {
-      "name": "TvlCapUpdatedEvent",
-      "topic": "tvl_cap_updated",
-      "description": "Emitted when TVL cap is updated",
+      "description": "Emitted by the contract.",
       "fields": [
         {
-          "name": "new_cap",
-          "type": "i128"
+          "name": "paused",
+          "type": "bool",
+          "description": "`true` if the vault is now paused, `false` if it is now unpaused"
+        },
+        {
+          "name": "caller",
+          "type": "Address",
+          "description": "Address that triggered the pause/unpause transition"
         }
       ]
     },
     {
-      "name": "UserDepositCapUpdatedEvent",
-      "topic": "user_cap_updated",
-      "description": "Emitted when user deposit cap is updated",
+      "name": "VaultInitializedEvent",
+      "topic": "init",
+      "description": "Emitted by the contract.",
       "fields": [
         {
-          "name": "new_cap",
-          "type": "i128"
-        }
-      ]
-    },
-    {
-      "name": "CapsUpdatedEvent",
-      "topic": "caps_updated",
-      "description": "Emitted when both caps are updated atomically",
-      "fields": [
+          "name": "owner",
+          "type": "Address",
+          "description": "Initial owner address, authorized for every administrative entrypoint (pause, caps, pool configuration, upgrades, ownership transfer)"
+        },
         {
-          "name": "user_deposit_cap",
-          "type": "i128"
+          "name": "agent",
+          "type": "Address",
+          "description": "Authorized AI agent address; the only address allowed to call `rebalance` and `update_total_assets`"
+        },
+        {
+          "name": "usdc_token",
+          "type": "Address",
+          "description": "USDC token contract address; the only token the vault accepts"
         },
         {
           "name": "tvl_cap",
-          "type": "i128"
-        }
-      ]
-    },
-    {
-      "name": "LimitsUpdatedEvent",
-      "topic": "limits_updated",
-      "description": "Emitted when deposit limits are updated",
-      "fields": [
-        {
-          "name": "min_deposit",
-          "type": "i128"
-        },
-        {
-          "name": "max_deposit",
-          "type": "i128"
-        }
-      ]
-    },
-    {
-      "name": "AgentUpdatedEvent",
-      "topic": "agent_updated",
-      "description": "Emitted when agent address is updated",
-      "fields": [
-        {
-          "name": "new_agent",
-          "type": "Address"
-        }
-      ]
-    },
-    {
-      "name": "OwnershipTransferInitiatedEvent",
-      "topic": "transfer_initiated",
-      "description": "Emitted when ownership transfer is initiated",
-      "fields": [
-        {
-          "name": "current_owner",
-          "type": "Address"
-        },
-        {
-          "name": "pending_owner",
-          "type": "Address"
-        }
-      ]
-    },
-    {
-      "name": "OwnershipTransferredEvent",
-      "topic": "ownership_transferred",
-      "description": "Emitted when ownership transfer is completed",
-      "fields": [
-        {
-          "name": "previous_owner",
-          "type": "Address"
-        },
-        {
-          "name": "new_owner",
-          "type": "Address"
-        }
-      ]
-    },
-    {
-      "name": "OwnershipTransferCancelledEvent",
-      "topic": "transfer_cancelled",
-      "description": "Emitted when pending ownership transfer is cancelled",
-      "fields": [
-        {
-          "name": "owner",
-          "type": "Address"
-        },
-        {
-          "name": "cancelled_pending",
-          "type": "Address"
-        }
-      ]
-    },
-    {
-      "name": "AssetsUpdatedEvent",
-      "topic": "assets_updated",
-      "description": "Emitted when total assets are updated to reflect yield or loss",
-      "fields": [
-        {
-          "name": "old_total",
-          "type": "i128"
-        },
-        {
-          "name": "new_total",
-          "type": "i128"
-        }
-      ]
-    },
-    {
-      "name": "UpgradedEvent",
-      "topic": "upgraded",
-      "description": "Emitted when contract is upgraded to new WASM",
-      "fields": [
-        {
-          "name": "old_version",
-          "type": "u32"
-        },
-        {
-          "name": "new_version",
-          "type": "u32"
-        }
-      ]
-    },
-    {
-      "name": "DepositLimitsUpdatedEvent",
-      "topic": "dep_lim",
-      "description": "Emitted when per-transaction deposit limits are updated",
-      "fields": [
-        {
-          "name": "old_min",
-          "type": "i128"
-        },
-        {
-          "name": "new_min",
-          "type": "i128"
-        },
-        {
-          "name": "old_max",
-          "type": "i128"
-        },
-        {
-          "name": "new_max",
-          "type": "i128"
-        }
-      ]
-    },
-    {
-      "name": "BlendPoolConfiguredEvent",
-      "topic": "blend_cfg",
-      "description": "Emitted when the Blend pool address is configured",
-      "fields": [
-        {
-          "name": "old_pool",
-          "type": "Option<Address>"
-        },
-        {
-          "name": "new_pool",
-          "type": "Address"
-        },
-        {
-          "name": "owner",
-          "type": "Address"
-        }
-      ]
-    },
-    {
-      "name": "DexPoolConfiguredEvent",
-      "topic": "dex_cfg",
-      "description": "Emitted when the DEX pool address is configured",
-      "fields": [
-        {
-          "name": "old_pool",
-          "type": "Option<Address>"
-        },
-        {
-          "name": "new_pool",
-          "type": "Address"
-        },
-        {
-          "name": "owner",
-          "type": "Address"
-        }
-      ]
-    },
-    {
-      "name": "DexSupplyEvent",
-      "topic": "dex_sup",
-      "description": "Emitted when funds are supplied to a DEX liquidity pool",
-      "fields": [
-        {
-          "name": "asset",
-          "type": "Address"
-        },
-        {
-          "name": "amount_actual",
-          "type": "i128"
-        },
-        {
-          "name": "success",
-          "type": "bool"
-        }
-      ]
-    },
-    {
-      "name": "DexWithdrawEvent",
-      "topic": "dex_wd",
-      "description": "Emitted when funds are withdrawn from a DEX liquidity pool",
-      "fields": [
-        {
-          "name": "asset",
-          "type": "Address"
-        },
-        {
-          "name": "amount_actual",
-          "type": "i128"
-        },
-        {
-          "name": "success",
-          "type": "bool"
-        }
-      ]
-    },
-    {
-      "name": "BlendSupplyEvent",
-      "topic": "blend_supply",
-      "description": "Emitted when funds are supplied to Blend protocol",
-      "fields": [
-        {
-          "name": "amount",
           "type": "i128",
-          "description": "Amount supplied to Blend"
-        },
-        {
-          "name": "b_tokens_received",
-          "type": "i128",
-          "description": "bUSDC tokens received"
-        }
-      ]
-    },
-    {
-      "name": "BlendWithdrawEvent",
-      "topic": "blend_withdraw",
-      "description": "Emitted when funds are withdrawn from Blend protocol",
-      "fields": [
-        {
-          "name": "b_tokens",
-          "type": "i128",
-          "description": "bUSDC tokens burned"
-        },
-        {
-          "name": "amount_received",
-          "type": "i128",
-          "description": "USDC amount received"
+          "description": "TVL cap applied at initialization, in USDC raw units (7 decimals)"
         }
       ]
     },
     {
       "name": "InitFailedEvent",
       "topic": "init_failed",
-      "description": "Emitted when initialization fails"
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "caller",
+          "type": "Address",
+          "description": "Address that attempted the initialization"
+        },
+        {
+          "name": "reason",
+          "type": "Symbol",
+          "description": "Short reason code describing why initialization was rejected"
+        }
+      ]
+    },
+    {
+      "name": "VaultPausedEvent",
+      "topic": "unknown",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "owner",
+          "type": "Address",
+          "description": "Owner address that triggered the pause (read from storage, not the caller argument)"
+        }
+      ]
+    },
+    {
+      "name": "VaultUnpausedEvent",
+      "topic": "unknown",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "owner",
+          "type": "Address",
+          "description": "Owner address that triggered the unpause (read from storage, not the caller argument)"
+        }
+      ]
+    },
+    {
+      "name": "EmergencyPausedEvent",
+      "topic": "unknown",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "owner",
+          "type": "Address",
+          "description": "Owner address that triggered the emergency pause (read from storage, not the caller argument)"
+        }
+      ]
+    },
+    {
+      "name": "TvlCapUpdatedEvent",
+      "topic": "tvl_cap",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_cap",
+          "type": "i128",
+          "description": "TVL cap before the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "new_cap",
+          "type": "i128",
+          "description": "TVL cap after the change, in USDC raw units (7 decimals)"
+        }
+      ]
+    },
+    {
+      "name": "UserDepositCapUpdatedEvent",
+      "topic": "user_cap",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_cap",
+          "type": "i128",
+          "description": "Per-user deposit cap before the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "new_cap",
+          "type": "i128",
+          "description": "Per-user deposit cap after the change, in USDC raw units (7 decimals)"
+        }
+      ]
+    },
+    {
+      "name": "CapsUpdatedEvent",
+      "topic": "caps_upd",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_user_cap",
+          "type": "i128",
+          "description": "Per-user deposit cap before the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "new_user_cap",
+          "type": "i128",
+          "description": "Per-user deposit cap after the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "old_tvl_cap",
+          "type": "i128",
+          "description": "TVL cap before the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "new_tvl_cap",
+          "type": "i128",
+          "description": "TVL cap after the change, in USDC raw units (7 decimals)"
+        }
+      ]
+    },
+    {
+      "name": "LimitsUpdatedEvent",
+      "topic": "l_upd",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_min",
+          "type": "i128",
+          "description": "Minimum per-transaction deposit before the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "new_min",
+          "type": "i128",
+          "description": "Minimum per-transaction deposit after the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "old_max",
+          "type": "i128",
+          "description": "Maximum per-transaction deposit before the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "new_max",
+          "type": "i128",
+          "description": "Maximum per-transaction deposit after the change, in USDC raw units (7 decimals)"
+        }
+      ]
+    },
+    {
+      "name": "DepositLimitsUpdatedEvent",
+      "topic": "dep_lim",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_min",
+          "type": "i128",
+          "description": "Minimum per-transaction deposit before the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "new_min",
+          "type": "i128",
+          "description": "Minimum per-transaction deposit after the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "old_max",
+          "type": "i128",
+          "description": "Maximum per-transaction deposit before the change, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "new_max",
+          "type": "i128",
+          "description": "Maximum per-transaction deposit after the change, in USDC raw units (7 decimals)"
+        }
+      ]
+    },
+    {
+      "name": "RebalanceCooldownUpdatedEvent",
+      "topic": "reb_cd",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_interval",
+          "type": "u32",
+          "description": "Minimum ledgers between rebalances before the change, or `0` if disabled"
+        },
+        {
+          "name": "new_interval",
+          "type": "u32",
+          "description": "Minimum ledgers between rebalances after the change, or `0` if disabled"
+        }
+      ]
+    },
+    {
+      "name": "ApprovalTtlUpdatedEvent",
+      "topic": "ttl_upd",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_ttl",
+          "type": "u32",
+          "description": "Approval TTL in ledgers before the change"
+        },
+        {
+          "name": "new_ttl",
+          "type": "u32",
+          "description": "Approval TTL in ledgers after the change"
+        }
+      ]
+    },
+    {
+      "name": "AgentUpdatedEvent",
+      "topic": "agent",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_agent",
+          "type": "Address",
+          "description": "Agent address that was authorized before the change"
+        },
+        {
+          "name": "new_agent",
+          "type": "Address",
+          "description": "Agent address authorized after the change"
+        }
+      ]
+    },
+    {
+      "name": "AgentUpdateProposedEvent",
+      "topic": "agt_prop",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_agent",
+          "type": "Address",
+          "description": "Agent address currently authorized; remains active for the whole timelock window"
+        },
+        {
+          "name": "new_agent",
+          "type": "Address",
+          "description": "Proposed agent address, activated only by `confirm_agent_update`"
+        },
+        {
+          "name": "effective_ledger",
+          "type": "u32",
+          "description": "Ledger at which `confirm_agent_update()` becomes callable."
+        }
+      ]
+    },
+    {
+      "name": "AgentUpdateConfirmedEvent",
+      "topic": "agt_conf",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_agent",
+          "type": "Address",
+          "description": "Agent address that was authorized before confirmation"
+        },
+        {
+          "name": "new_agent",
+          "type": "Address",
+          "description": "Agent address now authorized to call `rebalance` and `update_total_assets`"
+        }
+      ]
+    },
+    {
+      "name": "AgentUpdateCancelledEvent",
+      "topic": "agt_cncl",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_agent",
+          "type": "Address",
+          "description": "Agent address that stays authorized; cancelling never changes the active agent"
+        },
+        {
+          "name": "proposed_new_agent",
+          "type": "Address",
+          "description": "Agent address that had been proposed and is now discarded"
+        }
+      ]
+    },
+    {
+      "name": "OwnershipTransferInitiatedEvent",
+      "topic": "own_init",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "current_owner",
+          "type": "Address",
+          "description": "Owner address that remains in control until the transfer is accepted"
+        },
+        {
+          "name": "pending_owner",
+          "type": "Address",
+          "description": "Proposed owner address that must call `accept_ownership` to take over"
+        }
+      ]
+    },
+    {
+      "name": "OwnershipTransferredEvent",
+      "topic": "own_xfer",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_owner",
+          "type": "Address",
+          "description": "Owner address that held control before the transfer"
+        },
+        {
+          "name": "new_owner",
+          "type": "Address",
+          "description": "Owner address now authorized for administrative entrypoints"
+        }
+      ]
+    },
+    {
+      "name": "OwnershipTransferCancelledEvent",
+      "topic": "own_cncl",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "owner",
+          "type": "Address",
+          "description": "Owner address that stays in control; cancelling never changes the owner"
+        },
+        {
+          "name": "cancelled_pending",
+          "type": "Address",
+          "description": "Pending owner address that was discarded"
+        }
+      ]
+    },
+    {
+      "name": "AssetsUpdatedEvent",
+      "topic": "assets",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_total",
+          "type": "i128",
+          "description": "Total managed assets before the update, in USDC raw units (7 decimals)"
+        },
+        {
+          "name": "new_total",
+          "type": "i128",
+          "description": "Total managed assets after the update, in USDC raw units (7 decimals)"
+        }
+      ]
+    },
+    {
+      "name": "UpgradedEvent",
+      "topic": "upgraded",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_version",
+          "type": "u32",
+          "description": "The contract version before the upgrade"
+        },
+        {
+          "name": "new_version",
+          "type": "u32",
+          "description": "The contract version after the upgrade"
+        }
+      ]
+    },
+    {
+      "name": "UpgradeScheduledEvent",
+      "topic": "upg_sched",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "new_wasm_hash",
+          "type": "BytesN<32>",
+          "description": "Hash of the WASM binary that will be activated once the timelock elapses."
+        },
+        {
+          "name": "effective_ledger",
+          "type": "u32",
+          "description": "Ledger at which `execute_upgrade()` becomes callable."
+        }
+      ]
+    },
+    {
+      "name": "UpgradeCancelledEvent",
+      "topic": "upg_cncl",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "cancelled_wasm_hash",
+          "type": "BytesN<32>",
+          "description": "Hash of the WASM binary whose pending upgrade was cancelled."
+        }
+      ]
+    },
+    {
+      "name": "BlendSupplyEvent",
+      "topic": "blend_sup",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "asset",
+          "type": "Address",
+          "description": "The asset address (USDC)"
+        },
+        {
+          "name": "amount_actual",
+          "type": "i128",
+          "description": "Actual amount transferred to Blend (may be less than requested due to pool limits)"
+        },
+        {
+          "name": "success",
+          "type": "bool",
+          "description": "Whether the supply was successful"
+        }
+      ]
+    },
+    {
+      "name": "BlendWithdrawEvent",
+      "topic": "blend_wd",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "asset",
+          "type": "Address",
+          "description": "The asset address (USDC)"
+        },
+        {
+          "name": "amount_actual",
+          "type": "i128",
+          "description": "Actual amount received from Blend (may be less than requested due to pool liquidity)"
+        },
+        {
+          "name": "success",
+          "type": "bool",
+          "description": "Whether the withdrawal succeeded"
+        }
+      ]
+    },
+    {
+      "name": "BlendPoolConfiguredEvent",
+      "topic": "blend_cfg",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_pool",
+          "type": "Option<Address>",
+          "description": "Previous Blend pool address, or None if it was not configured"
+        },
+        {
+          "name": "new_pool",
+          "type": "Address",
+          "description": "Newly configured Blend pool address"
+        },
+        {
+          "name": "owner",
+          "type": "Address",
+          "description": "Owner who triggered the configuration change"
+        }
+      ]
+    },
+    {
+      "name": "DexSupplyEvent",
+      "topic": "dex_sup",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "asset",
+          "type": "Address",
+          "description": "The asset address (USDC)"
+        },
+        {
+          "name": "amount_actual",
+          "type": "i128",
+          "description": "Actual amount transferred to the DEX pool (may be less than requested due to slippage/limits)"
+        },
+        {
+          "name": "success",
+          "type": "bool",
+          "description": "Whether the supply was successful"
+        }
+      ]
+    },
+    {
+      "name": "DexWithdrawEvent",
+      "topic": "dex_wd",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "asset",
+          "type": "Address",
+          "description": "The asset address (USDC)"
+        },
+        {
+          "name": "amount_actual",
+          "type": "i128",
+          "description": "Actual amount received from the DEX pool (may be less than requested due to liquidity)"
+        },
+        {
+          "name": "success",
+          "type": "bool",
+          "description": "Whether the withdrawal succeeded"
+        }
+      ]
+    },
+    {
+      "name": "DexPoolConfiguredEvent",
+      "topic": "dex_cfg",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "old_pool",
+          "type": "Option<Address>",
+          "description": "Previous DEX pool address, or None if it was not configured"
+        },
+        {
+          "name": "new_pool",
+          "type": "Address",
+          "description": "Newly configured DEX pool address"
+        },
+        {
+          "name": "owner",
+          "type": "Address",
+          "description": "Owner who triggered the configuration change"
+        }
+      ]
     },
     {
       "name": "RebalanceFailedEvent",
-      "topic": "rebalance_failed",
-      "description": "Emitted when rebalance operation fails",
+      "topic": "reb_fail",
+      "description": "Emitted by the contract.",
       "fields": [
         {
+          "name": "from_protocol",
+          "type": "Symbol",
+          "description": "The protocol the vault was trying to exit"
+        },
+        {
           "name": "reason",
-          "type": "String",
-          "description": "Failure reason"
+          "type": "Symbol",
+          "description": "Short reason code (\"exit_fail\" = incomplete withdrawal)"
+        }
+      ]
+    },
+    {
+      "name": "UserStrategyUpdatedEvent",
+      "topic": "unknown",
+      "description": "Emitted by the contract.",
+      "fields": [
+        {
+          "name": "user",
+          "type": "Address",
+          "description": "The user who updated their strategy"
+        },
+        {
+          "name": "old_strategy",
+          "type": "Symbol",
+          "description": "Previous strategy symbol (\"conservative\", \"balanced\", \"growth\", or \"\")"
+        },
+        {
+          "name": "new_strategy",
+          "type": "Symbol",
+          "description": "New strategy symbol"
         }
       ]
     }
@@ -1701,15 +2101,267 @@
   "errors": {
     "VaultError::NegativeMin": {
       "code": 1,
-      "description": "Supplied min limit is negative"
+      "description": "Supplied min limit is negative."
     },
     "VaultError::NegativeMax": {
       "code": 2,
-      "description": "Supplied max limit is negative"
+      "description": "Supplied max limit is negative."
     },
     "VaultError::MaxLessThanMin": {
       "code": 3,
-      "description": "Max must be greater than or equal to min"
+      "description": "max must be greater than or equal to min."
+    },
+    "VaultError::AlreadyInitialized": {
+      "code": 4,
+      "description": "Vault has already been initialized."
+    },
+    "VaultError::UnauthorizedDeployer": {
+      "code": 5,
+      "description": "Initializer is not the expected deployer."
+    },
+    "VaultError::SharesToMintMustBePositive": {
+      "code": 6,
+      "description": "Minted shares must be positive."
+    },
+    "VaultError::InsufficientLiquidity": {
+      "code": 7,
+      "description": "Vault has no liquidity for the requested withdrawal."
+    },
+    "VaultError::InsufficientShares": {
+      "code": 8,
+      "description": "User has insufficient shares."
+    },
+    "VaultError::NoAssetsToWithdraw": {
+      "code": 9,
+      "description": "Vault has no assets to withdraw."
+    },
+    "VaultError::SharesToBurnMustBePositive": {
+      "code": 10,
+      "description": "Burned shares must be positive."
+    },
+    "VaultError::InsufficientSharesForAmount": {
+      "code": 11,
+      "description": "User has insufficient shares for the requested amount."
+    },
+    "VaultError::NoSharesToWithdraw": {
+      "code": 12,
+      "description": "User has no shares to withdraw."
+    },
+    "VaultError::NoLiquidityAvailable": {
+      "code": 13,
+      "description": "Vault has no liquidity available."
+    },
+    "VaultError::NoAssetsToReturn": {
+      "code": 14,
+      "description": "Vault has no assets to return."
+    },
+    "VaultError::NoSharesToBurn": {
+      "code": 15,
+      "description": "Vault has no shares to burn."
+    },
+    "VaultError::MinOutMustBeNonNegative": {
+      "code": 16,
+      "description": "min_out must be non-negative."
+    },
+    "VaultError::UnsupportedProtocol": {
+      "code": 17,
+      "description": "Protocol is not supported."
+    },
+    "VaultError::BlendPoolNotConfigured": {
+      "code": 18,
+      "description": "Blend pool is not configured."
+    },
+    "VaultError::OnlyOwnerCanPause": {
+      "code": 19,
+      "description": "Caller is not allowed to pause."
+    },
+    "VaultError::OnlyOwnerCanUnpause": {
+      "code": 20,
+      "description": "Caller is not allowed to unpause."
+    },
+    "VaultError::NotPaused": {
+      "code": 21,
+      "description": "Vault is not paused."
+    },
+    "VaultError::OnlyOwnerCanEmergencyPause": {
+      "code": 22,
+      "description": "Caller is not allowed to emergency pause."
+    },
+    "VaultError::TvlCapCannotBeNegative": {
+      "code": 23,
+      "description": "TVL cap cannot be negative."
+    },
+    "VaultError::UserDepositCapCannotBeNegative": {
+      "code": 24,
+      "description": "User deposit cap cannot be negative."
+    },
+    "VaultError::TvlCapBelowUserDepositCap": {
+      "code": 25,
+      "description": "TVL cap must be greater than or equal to user deposit cap."
+    },
+    "VaultError::MinimumDepositTooLow": {
+      "code": 26,
+      "description": "Minimum deposit is below the allowed floor."
+    },
+    "VaultError::MaximumDepositBelowMinimum": {
+      "code": 27,
+      "description": "Maximum deposit is below the minimum."
+    },
+    "VaultError::OnlyOwnerCanConfigurePool": {
+      "code": 28,
+      "description": "Caller is not allowed to configure a protocol pool."
+    },
+    "VaultError::CallerIsNotPendingOwner": {
+      "code": 29,
+      "description": "Caller is not the pending owner (or no pending ownership transfer exists)."
+    },
+    "VaultError::OnlyAgentCanUpdateTotalAssets": {
+      "code": 30,
+      "description": "Caller is not allowed to update total assets."
+    },
+    "VaultError::TotalAssetsDecreaseNotAllowed": {
+      "code": 31,
+      "description": "Total assets decrease requires explicit allowance."
+    },
+    "VaultError::DecreaseExceedsMaximumAllowedBps": {
+      "code": 32,
+      "description": "Total assets decrease exceeds configured maximum bps."
+    },
+    "VaultError::InsufficientBalanceForAssets": {
+      "code": 33,
+      "description": "Vault balance is insufficient for reported assets."
+    },
+    "VaultError::CallerIsNotOwner": {
+      "code": 34,
+      "description": "Caller is not the owner."
+    },
+    "VaultError::Paused": {
+      "code": 35,
+      "description": "Vault is paused."
+    },
+    "VaultError::NotInitialized": {
+      "code": 36,
+      "description": "Vault is not initialized."
+    },
+    "VaultError::AmountMustBePositive": {
+      "code": 37,
+      "description": "Amount must be positive."
+    },
+    "VaultError::BelowMinimumDeposit": {
+      "code": 38,
+      "description": "Deposit is below the configured minimum."
+    },
+    "VaultError::MaximumDepositExceeded": {
+      "code": 39,
+      "description": "Deposit exceeds the configured maximum."
+    },
+    "VaultError::ExceedsUserDepositCap": {
+      "code": 40,
+      "description": "Deposit exceeds user cap."
+    },
+    "VaultError::ExceedsTvlCap": {
+      "code": 41,
+      "description": "Deposit exceeds TVL cap."
+    },
+    "VaultError::MinOutNotMet": {
+      "code": 42,
+      "description": "A protocol leg returned less than min_out."
+    },
+    "VaultError::RebalanceCooldownActive": {
+      "code": 43,
+      "description": "Rebalance called before the configured cooldown has elapsed."
+    },
+    "VaultError::ApprovalTtlTooLow": {
+      "code": 44,
+      "description": "Approval TTL is below the allowed floor."
+    },
+    "VaultError::ApprovalTtlTooHigh": {
+      "code": 45,
+      "description": "Approval TTL is above the allowed ceiling."
+    },
+    "VaultError::DexPoolNotConfigured": {
+      "code": 46,
+      "description": "DEX liquidity pool is not configured."
+    },
+    "VaultError::InvalidStrategy": {
+      "code": 47,
+      "description": "Strategy must be one of \"conservative\", \"balanced\", or \"growth\"."
+    },
+    "VaultError::TimelockAlreadyPending": {
+      "code": 48,
+      "description": "A timelocked proposal (agent update or upgrade) is already pending.  Shared by the agent timelock (#317) and the upgrade timelock (#316). The SDK caps `#[contracterror]` enums at 50 cases, so both two-step flows reuse one set of generic timelock error codes rather than each defining their own."
+    },
+    "VaultError::NoTimelockPending": {
+      "code": 49,
+      "description": "No timelocked proposal exists to confirm/execute or cancel."
+    },
+    "VaultError::TimelockNotExpired": {
+      "code": 50,
+      "description": "The timelock delay has not yet elapsed."
+    },
+    "VaultError::ShareConversionOverflow": {
+      "code": 51,
+      "description": "Share conversion intermediate product overflow (assets * total_shares)."
+    },
+    "VaultError::TotalDepositsOverflow": {
+      "code": 52,
+      "description": "Total deposits arithmetic overflow."
+    },
+    "VaultError::SharesOverflow": {
+      "code": 53,
+      "description": "User shares arithmetic overflow."
+    },
+    "VaultError::TotalSharesOverflow": {
+      "code": 54,
+      "description": "Total shares arithmetic overflow."
+    },
+    "VaultError::TotalAssetsOverflow": {
+      "code": 55,
+      "description": "Total assets arithmetic overflow."
+    },
+    "VaultError::ShareToAssetConversionOverflow": {
+      "code": 56,
+      "description": "Share conversion intermediate product overflow (shares * total_assets)."
+    },
+    "VaultError::ExchangeRateOverflow": {
+      "code": 57,
+      "description": "Exchange rate intermediate product overflow (total_assets * scalar)."
+    },
+    "VaultError::WithdrawalUnderflow": {
+      "code": 58,
+      "description": "Arithmetic underflow in withdrawal."
+    },
+    "VaultError::MaxDecreaseOverflow": {
+      "code": 59,
+      "description": "Maximum decrease calculation overflow."
+    },
+    "VaultError::TotalAvailableOverflow": {
+      "code": 60,
+      "description": "Total available balance overflow."
+    },
+    "VaultError::VersionOverflow": {
+      "code": 61,
+      "description": "Version counter overflow."
+    },
+    "VaultError::DeployerCannotBeZeroAddress": {
+      "code": 62,
+      "description": "Deployer address supplied to `initialize` is the zero address."
+    },
+    "VaultError::OwnerCannotBeZeroAddress": {
+      "code": 63,
+      "description": "Owner address supplied to `initialize` is the zero address."
+    },
+    "VaultError::AgentCannotBeZeroAddress": {
+      "code": 64,
+      "description": "Agent address supplied to `initialize` is the zero address."
+    },
+    "VaultError::UsdcTokenCannotBeZeroAddress": {
+      "code": 65,
+      "description": "USDC token address supplied to `initialize` is the zero address."
+    },
+    "VaultError::MaximumDepositExceedsCeiling": {
+      "code": 66,
+      "description": "Maximum per-transaction deposit exceeds the absolute configured ceiling."
     },
     "ValidationError": {
       "code": 100,

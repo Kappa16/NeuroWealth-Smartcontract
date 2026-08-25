@@ -39,6 +39,63 @@ fn test_deposit_maximum_succeeds() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #37)")]
+fn test_deposit_zero_assets_rejected() {
+    // A zero-asset deposit must be rejected early with AmountMustBePositive (#37),
+    // before any token transfer or storage write occurs. Zero-value deposits would
+    // otherwise consume ledger resources without changing vault state (Issue #537).
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+
+    let user = Address::generate(&env);
+
+    // Fund the user with some USDC so the rejection is clearly about the zero
+    // amount, not an insufficient balance.
+    token_client.mint(&user, &10_000_000_i128);
+    client.deposit(&user, &0_0000000_i128);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #37)")]
+fn test_deposit_zero_after_approving_zero_rejected() {
+    // Edge case: explicitly approve zero tokens, then deposit zero. The positive-amount
+    // guard fires before the token transfer, so the allowance value is irrelevant (#537).
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+
+    let user = Address::generate(&env);
+
+    token_client.mint(&user, &10_000_000_i128);
+    token_client.approve(&user, &contract_id, &0_i128, &u32::MAX);
+    client.deposit(&user, &0_0000000_i128);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #37)")]
+fn test_deposit_zero_with_no_allowance_rejected() {
+    // Edge case: deposit zero with no allowance set at all. The vault still rejects
+    // on the positive-amount guard before touching the token contract (#537).
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+
+    // No mint, no approve — nothing but a zero-amount deposit.
+    client.deposit(&user, &0_0000000_i128);
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #38)")]
 fn test_deposit_below_minimum_panics() {
     let env = Env::default();

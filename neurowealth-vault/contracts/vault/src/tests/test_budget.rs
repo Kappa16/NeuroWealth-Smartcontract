@@ -180,3 +180,36 @@ fn test_budget_rebalance_to_none() {
         "rebalance-to-none memory cost regressed: {mem}"
     );
 }
+
+// ============================================================================
+// Issue #505 – harvest budget
+// ============================================================================
+
+#[test]
+fn test_budget_harvest() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, usdc_token, blend_pool) =
+        setup_vault_with_token_and_blend(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_blend_pool(&owner, &blend_pool);
+
+    let user = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user, 10_000_000_i128);
+
+    // Move funds into Blend so harvest has a position to compound
+    client.rebalance(&symbol_short!("blend"), &850_i128, &0_i128);
+
+    let (cpu, mem) = measure(&env, || {
+        client.harvest(&0_i128);
+    });
+
+    std::println!("[budget] harvest  cpu={cpu}  mem={mem}");
+
+    // harvest does a withdraw + supply round trip through Blend, similar
+    // in cost to a full rebalance; allow the same upper bounds.
+    assert!(cpu < 15_000_000, "harvest CPU cost regressed: {cpu}");
+    assert!(mem < 600_000, "harvest memory cost regressed: {mem}");
+}

@@ -17,20 +17,32 @@ All events use short symbol topics (max 9 characters) for efficiency:
 - Payload contains detailed event data
 - Events are published from the vault contract address
 
-Canonical topics are declared in [neurowealth-vault/contracts/vault/src/lib.rs](neurowealth-vault/contracts/vault/src/lib.rs) as `TOPIC_*` constants and should be used as the single source of truth by emit sites and tests.
+Canonical topics are declared in [neurowealth-vault/contracts/vault/src/topics.rs](neurowealth-vault/contracts/vault/src/topics.rs) as `TOPIC_*` constants and should be used as the single source of truth by emit sites and tests. `lib.rs` imports them rather than redefining its own copies, so the on-chain symbols, that module, and this document cannot drift apart.
+
+Every event below lists its `TOPIC_*` constant alongside the literal symbol. Three events publish an additional indexed `Address` as topic 1 so indexers can filter per user without scanning payloads: `DepositEvent`, `WithdrawEvent`, and `UserStrategyUpdatedEvent`.
+
+### Field description convention
+
+Every field in every payload below carries a one-line description matching the
+NatDoc on the corresponding Rust struct in `lib.rs`. Amounts are in **USDC raw
+units with 7 decimals** unless stated otherwise (1 USDC = `10_000_000`), and
+`old_*` / `new_*` pairs are the values immediately before and after the state
+change that triggered the event.
 
 ## Core Events
 
 ### 1. VaultInitializedEvent
-**Topic:** `"init"`
+**Topic:** `"init"` (`TOPIC_INIT`)
 
-Emitted when the vault is initialized with core configuration.
+Emitted exactly once, by `initialize`, when the vault is set up with its core
+configuration.
 
 ```rust
 pub struct VaultInitializedEvent {
-    pub agent: Address,        // Authorized AI agent address
-    pub usdc_token: Address,   // USDC token contract address
-    pub tvl_cap: i128,        // Initial TVL cap (7 decimals)
+    pub owner: Address,        // Initial owner; authorized for every administrative entrypoint (pause, caps, pool configuration, upgrades, ownership transfer)
+    pub agent: Address,        // Authorized AI agent; the only address allowed to call rebalance and update_total_assets
+    pub usdc_token: Address,   // USDC token contract address; the only token the vault accepts
+    pub tvl_cap: i128,         // TVL cap applied at initialization, in USDC raw units (7 decimals)
 }
 ```
 
@@ -94,7 +106,7 @@ pub struct WithdrawEvent {
 - Indexers filter withdrawal history by user via topic[1]
 
 ### 4. RebalanceEvent
-**Topic:** `"rebalance"`
+**Topic:** `"rebalance"` (`TOPIC_REBALANCE`)
 
 Emitted when the AI agent rebalances funds between yield strategies.
 
@@ -122,14 +134,14 @@ pub struct RebalanceEvent {
 - Indexers monitor strategy changes for risk analysis
 
 ### 4a. ProtocolChangedEvent
-**Topic:** `"proto_chg"`
+**Topic:** `"proto_chg"` (`TOPIC_PROTOCOL_CHANGED`)
 
-Emitted when `CurrentProtocol` storage changes (supply to Blend, full withdraw, or explicit transition to `"none"`).
+Emitted when `CurrentProtocol` storage changes (supply to Blend or a DEX pool, full withdraw, or explicit transition to `"none"`).
 
 ```rust
 pub struct ProtocolChangedEvent {
-    pub old_protocol: Symbol,
-    pub new_protocol: Symbol,
+    pub old_protocol: Symbol,   // Protocol the vault was deployed to before the change ("blend", "dex", or "none")
+    pub new_protocol: Symbol,   // Protocol the vault is deployed to after the change ("blend", "dex", or "none")
 }
 ```
 
@@ -137,7 +149,7 @@ pub struct ProtocolChangedEvent {
 - Indexers record explicit protocol state transitions without inferring from rebalance events alone
 
 ### 4b. RebalanceFailedEvent
-**Topic:** `"reb_fail"`
+**Topic:** `"reb_fail"` (`TOPIC_REBALANCE_FAILED`)
 
 Emitted when a rebalance exits a protocol but the withdrawal leg leaves a non-zero balance behind (incomplete exit).
 
@@ -148,43 +160,81 @@ pub struct RebalanceFailedEvent {
 }
 ```
 
+### 4c. HarvestEvent
+**Topic:** `"harvest"` (`TOPIC_HARVEST`)
+
+Emitted when the AI agent compounds accrued yield via `harvest()`. The
+function withdraws from the active protocol and immediately re-supplies,
+so the vault balance returns to the same position with compounded yield.
+
+```rust
+pub struct HarvestEvent {
+    pub protocol: Symbol,       // The protocol harvested from ("blend" or "dex")
+    pub amount_harvested: i128, // Amount withdrawn and re-deposited
+}
+```
+
+**Usage:**
+- AI agents track compounding frequency and yield accrual
+- Indexers distinguish harvests from rebalances for audit trails
+
+### 4d. EmergencyHarvestEvent
+**Topic:** `"em_harv"` (`TOPIC_EMERGENCY_HARVEST`)
+
+Emitted when the **owner** triggers an emergency harvest fallback via
+`emergency_harvest()`. This is a distinct event from `HarvestEvent` so that
+indexers can differentiate agent-initiated harvests from owner-initiated
+emergency harvests during agent-key outages or rotations.
+
+```rust
+pub struct EmergencyHarvestEvent {
+    pub protocol: Symbol,       // The protocol harvested from ("blend" or "dex")
+    pub amount_harvested: i128, // Amount withdrawn and re-deposited
+}
+```
+
+**Usage:**
+- Indexers can alert on emergency harvests (potential agent-key issues)
+- Audit trail distinguishes owner vs agent compounding actions
+
 ## Administrative Events
 
 ### 5. VaultPausedEvent
-**Topic:** `"paused"`
+**Topic:** `"paused"` (`TOPIC_PAUSED`)
 
-Emitted when the vault is paused by the owner.
+Emitted by `pause` when the vault is paused by the owner.
 
 ```rust
 pub struct VaultPausedEvent {
-    pub owner: Address,   // Owner who triggered the pause
+    pub owner: Address,   // Owner address that triggered the pause, read from storage rather than the caller argument
 }
 ```
 
 ### 6. VaultUnpausedEvent
-**Topic:** `"unpaused"`
+**Topic:** `"unpaused"` (`TOPIC_UNPAUSED`)
 
-Emitted when the vault is unpaused by the owner.
+Emitted by `unpause` when the vault is unpaused by the owner.
 
 ```rust
 pub struct VaultUnpausedEvent {
-    pub owner: Address,   // Owner who triggered the unpause
+    pub owner: Address,   // Owner address that triggered the unpause, read from storage rather than the caller argument
 }
 ```
 
 ### 7. EmergencyPausedEvent
-**Topic:** `"emerg"`
+**Topic:** `"emerg"` (`TOPIC_EMERGENCY_PAUSED`)
 
-Emitted when the vault is emergency paused by the agent.
+Emitted by `emergency_pause`. Distinguished from `VaultPausedEvent` so
+monitoring can alert on emergency halts specifically.
 
 ```rust
 pub struct EmergencyPausedEvent {
-    pub owner: Address,   // Agent who triggered emergency pause
+    pub owner: Address,   // Owner address that triggered the emergency pause, read from storage rather than the caller argument
 }
 ```
 
 ### 8. LimitsUpdatedEvent
-**Topic:** `"l_upd"`
+**Topic:** `"l_upd"` (`TOPIC_LIMITS_UPDATED`)
 
 Emitted when per-transaction deposit limits are updated.
 
@@ -194,53 +244,53 @@ Emitted when per-transaction deposit limits are updated.
 
 ```rust
 pub struct LimitsUpdatedEvent {
-    pub old_min: i128,    // Previous minimum deposit limit
-    pub new_min: i128,    // New minimum deposit limit
-    pub old_max: i128,    // Previous maximum deposit limit
-    pub new_max: i128,    // New maximum deposit limit
+    pub old_min: i128,    // Minimum per-transaction deposit before the change (7 decimals)
+    pub new_min: i128,    // Minimum per-transaction deposit after the change (7 decimals)
+    pub old_max: i128,    // Maximum per-transaction deposit before the change (7 decimals)
+    pub new_max: i128,    // Maximum per-transaction deposit after the change (7 decimals)
 }
 ```
 
 ### 8a. DepositLimitsUpdatedEvent
-**Topic:** `"dep_lim"`
+**Topic:** `"dep_lim"` (`TOPIC_DEPOSIT_LIMITS_UPDATED`)
 
 Emitted when per-transaction deposit limits are updated via `set_deposit_limits`. This is the current, unambiguous replacement for the legacy `LimitsUpdatedEvent` topic above.
 
 ```rust
 pub struct DepositLimitsUpdatedEvent {
-    pub old_min: i128,    // Previous minimum deposit limit
-    pub new_min: i128,    // New minimum deposit limit
-    pub old_max: i128,    // Previous maximum deposit limit
-    pub new_max: i128,    // New maximum deposit limit
+    pub old_min: i128,    // Minimum per-transaction deposit before the change (7 decimals)
+    pub new_min: i128,    // Minimum per-transaction deposit after the change (7 decimals)
+    pub old_max: i128,    // Maximum per-transaction deposit before the change (7 decimals)
+    pub new_max: i128,    // Maximum per-transaction deposit after the change (7 decimals)
 }
 ```
 
 ### 8b. TvlCapUpdatedEvent
-**Topic:** `"tvl_cap"`
+**Topic:** `"tvl_cap"` (`TOPIC_TVL_CAP_UPDATED`)
 
-Emitted when the vault's total TVL cap is updated.
+Emitted by `set_tvl_cap` when the vault's total TVL cap is updated.
 
 ```rust
 pub struct TvlCapUpdatedEvent {
-    pub old_cap: i128,    // Previous TVL cap
-    pub new_cap: i128,    // New TVL cap
+    pub old_cap: i128,    // TVL cap before the change (7 decimals)
+    pub new_cap: i128,    // TVL cap after the change (7 decimals)
 }
 ```
 
 ### 8c. UserDepositCapUpdatedEvent
-**Topic:** `"user_cap"`
+**Topic:** `"user_cap"` (`TOPIC_USER_CAP_UPDATED`)
 
-Emitted when the per-user deposit cap is updated.
+Emitted by `set_user_deposit_cap` when the per-user deposit cap is updated.
 
 ```rust
 pub struct UserDepositCapUpdatedEvent {
-    pub old_cap: i128,    // Previous per-user cap
-    pub new_cap: i128,    // New per-user cap
+    pub old_cap: i128,    // Per-user deposit cap before the change (7 decimals)
+    pub new_cap: i128,    // Per-user deposit cap after the change (7 decimals)
 }
 ```
 
 ### 8d. CapsUpdatedEvent
-**Topic:** `"caps_upd"`
+**Topic:** `"caps_upd"` (`TOPIC_CAPS_UPDATED`)
 
 Emitted when user deposit and TVL caps are updated in a single transaction via `set_caps`.
 
@@ -254,85 +304,159 @@ pub struct CapsUpdatedEvent {
 ```
 
 
-### 9. AgentUpdatedEvent
-**Topic:** `"agent"`
+### 8e. RebalanceCooldownUpdatedEvent
+**Topic:** `"reb_cd"` (`TOPIC_REBALANCE_COOLDOWN_UPDATED`)
 
-Emitted when the AI agent address is updated.
+Emitted when the minimum rebalance cooldown is updated via `set_rebalance_cooldown`.
+
+```rust
+pub struct RebalanceCooldownUpdatedEvent {
+    pub old_interval: u32,   // Minimum ledgers between rebalances before the change, or 0 if disabled
+    pub new_interval: u32,   // Minimum ledgers between rebalances after the change, or 0 if disabled
+}
+```
+
+### 8f. ApprovalTtlUpdatedEvent
+**Topic:** `"ttl_upd"` (`TOPIC_APPROVAL_TTL_UPDATED`)
+
+Emitted when the shared Blend/DEX approval TTL is updated via `set_approval_ttl`.
+
+```rust
+pub struct ApprovalTtlUpdatedEvent {
+    pub old_ttl: u32,   // Approval TTL in ledgers before the change
+    pub new_ttl: u32,   // Approval TTL in ledgers after the change
+}
+```
+
+### 9. AgentUpdatedEvent
+**Topic:** `"agent"` (`TOPIC_AGENT_UPDATED`)
+
+Emitted when the AI agent address is updated. Also emitted alongside `AgentUpdateConfirmedEvent` upon timelock execution for backward compatibility with legacy indexers.
 
 ```rust
 pub struct AgentUpdatedEvent {
-    pub old_agent: Address,  // Previous agent address
-    pub new_agent: Address,  // New agent address
+    pub old_agent: Address,  // Agent address that was authorized before the change
+    pub new_agent: Address,  // Agent address authorized after the change
+}
+```
+
+### 9a. AgentUpdateProposedEvent
+**Topic:** `"agt_prop"` (`TOPIC_AGENT_UPDATE_PROPOSED`)
+
+Emitted when an agent update proposal is scheduled via `update_agent` — step 1 of the two-step timelocked agent update flow.
+
+```rust
+pub struct AgentUpdateProposedEvent {
+    pub old_agent: Address,       // Agent currently authorized; stays active for the whole timelock window
+    pub new_agent: Address,       // Proposed agent address, activated only by confirm_agent_update
+    pub effective_ledger: u32,    // Ledger sequence at which confirm_agent_update becomes callable
+}
+```
+
+### 9b. AgentUpdateConfirmedEvent
+**Topic:** `"agt_conf"` (`TOPIC_AGENT_UPDATE_CONFIRMED`)
+
+Emitted when a pending agent update proposal is executed via `confirm_agent_update` after the timelock window has elapsed — step 2 of the timelocked flow.
+
+```rust
+pub struct AgentUpdateConfirmedEvent {
+    pub old_agent: Address,       // Agent address that was authorized before confirmation
+    pub new_agent: Address,       // Agent address now authorized to call rebalance and update_total_assets
+}
+```
+
+### 9c. AgentUpdateCancelledEvent
+**Topic:** `"agt_cncl"` (`TOPIC_AGENT_UPDATE_CANCELLED`)
+
+Emitted when a pending proposed agent update is cancelled via `cancel_agent_update` before it is executed.
+
+```rust
+pub struct AgentUpdateCancelledEvent {
+    pub old_agent: Address,              // Agent that stays authorized; cancelling never changes the active agent
+    pub proposed_new_agent: Address,     // Proposed agent address that is now discarded
 }
 ```
 
 ### 10. AssetsUpdatedEvent
-**Topic:** `"assets"`
+**Topic:** `"assets"` (`TOPIC_ASSETS_UPDATED`)
 
-Emitted when total assets are updated (yield accrual).
+Emitted by `update_total_assets` when the agent reports new total assets (yield
+accrual or loss reporting). Because share price is derived from `TotalAssets`,
+this is the authoritative signal that the exchange rate has moved.
 
 ```rust
 pub struct AssetsUpdatedEvent {
-    pub old_total: i128,   // Previous total assets
-    pub new_total: i128,   // New total assets
+    pub old_total: i128,   // Total managed assets before the update (7 decimals)
+    pub new_total: i128,   // Total managed assets after the update (7 decimals)
 }
 ```
 
 ### 10a. UserStrategyUpdatedEvent
-**Topic:** `"usr_strat"`
+**Topics:** `("usr_strat", <user: Address>)` (`TOPIC_USER_STRATEGY_UPDATED`)
 
-Emitted when a user updates their investment strategy preference.
+Emitted by `set_user_strategy` when a user updates their investment strategy
+preference. The preference is advisory: it tells the AI agent where the user
+would like funds deployed, and does not by itself move assets.
+
+The user address is published as a second **indexed topic**, so agents can
+subscribe per user.
 
 ```rust
 pub struct UserStrategyUpdatedEvent {
     pub user: Address,          // The user who updated their strategy
-    pub old_strategy: Symbol,   // Previous strategy symbol ("conservative", "balanced", "growth", or "")
-    pub new_strategy: Symbol,   // New strategy symbol
+    pub old_strategy: Symbol,   // Strategy before the change: "conservative", "balanced", "growth", or "" the first time a user sets one
+    pub new_strategy: Symbol,   // Strategy after the change: "conservative", "balanced", or "growth"
 }
 ```
+
+**Topic tuple (position → value):**
+| Position | Type    | Value                        |
+|----------|---------|------------------------------|
+| 0        | Symbol  | `"usr_strat"`                |
+| 1        | Address | user whose strategy changed  |
 
 ## Ownership Transfer Events
 
 ### 11. OwnershipTransferInitiatedEvent
-**Topic:** `"own_init"`
+**Topic:** `"own_init"` (`TOPIC_OWNERSHIP_INITIATED`)
 
-Emitted when ownership transfer is initiated.
+Emitted by `transfer_ownership` — step 1 of the two-step ownership transfer.
 
 ```rust
 pub struct OwnershipTransferInitiatedEvent {
-    pub current_owner: Address,  // Current owner address
-    pub pending_owner: Address,  // Pending owner address
+    pub current_owner: Address,  // Owner that remains in control until the transfer is accepted
+    pub pending_owner: Address,  // Proposed owner, which must call accept_ownership to take over
 }
 ```
 
 ### 12. OwnershipTransferredEvent
-**Topic:** `"own_xfer"`
+**Topic:** `"own_xfer"` (`TOPIC_OWNERSHIP_TRANSFERRED`)
 
-Emitted when ownership transfer is completed.
+Emitted by `accept_ownership` — step 2 of the two-step ownership transfer.
 
 ```rust
 pub struct OwnershipTransferredEvent {
-    pub old_owner: Address,   // Previous owner address
-    pub new_owner: Address,   // New owner address
+    pub old_owner: Address,   // Owner that held control before the transfer
+    pub new_owner: Address,   // Owner now authorized for administrative entrypoints
 }
 ```
 
 ### 13. OwnershipTransferCancelledEvent
-**Topic:** `"own_cncl"`
+**Topic:** `"own_cncl"` (`TOPIC_OWNERSHIP_CANCELLED`)
 
-Emitted when ownership transfer is cancelled.
+Emitted by `cancel_ownership_transfer` when a pending transfer is discarded.
 
 ```rust
 pub struct OwnershipTransferCancelledEvent {
-    pub owner: Address,              // Current owner address
-    pub cancelled_pending: Address,  // Cancelled pending owner
+    pub owner: Address,              // Owner that stays in control; cancelling never changes the owner
+    pub cancelled_pending: Address,  // Pending owner address that was discarded
 }
 ```
 
 ## Protocol Integration Events
 
 ### 14. BlendSupplyEvent
-**Topic:** `"blend_sup"`
+**Topic:** `"blend_sup"` (`TOPIC_BLEND_SUPPLY`)
 
 Emitted when assets are supplied to Blend protocol.
 
@@ -345,7 +469,7 @@ pub struct BlendSupplyEvent {
 ```
 
 ### 15. BlendWithdrawEvent
-**Topic:** `"blend_wd"`
+**Topic:** `"blend_wd"` (`TOPIC_BLEND_WITHDRAW`)
 
 Emitted when assets are withdrawn from Blend protocol.
 
@@ -358,7 +482,7 @@ pub struct BlendWithdrawEvent {
 ```
 
 ### 15a. BlendPoolConfiguredEvent
-**Topic:** `"blend_cfg"`
+**Topic:** `"blend_cfg"` (`TOPIC_BLEND_POOL_CONFIGURED`)
 
 Emitted after `set_blend_pool` updates the configured Blend pool address.
 
@@ -371,7 +495,7 @@ pub struct BlendPoolConfiguredEvent {
 ```
 
 ### 15b. DexSupplyEvent
-**Topic:** `"dex_sup"`
+**Topic:** `"dex_sup"` (`TOPIC_DEX_SUPPLY`)
 
 Emitted when assets are supplied to a DEX liquidity pool (Issue #228).
 
@@ -384,7 +508,7 @@ pub struct DexSupplyEvent {
 ```
 
 ### 15c. DexWithdrawEvent
-**Topic:** `"dex_wd"`
+**Topic:** `"dex_wd"` (`TOPIC_DEX_WITHDRAW`)
 
 Emitted when assets are withdrawn from a DEX liquidity pool (Issue #228).
 
@@ -397,7 +521,7 @@ pub struct DexWithdrawEvent {
 ```
 
 ### 15d. DexPoolConfiguredEvent
-**Topic:** `"dex_cfg"`
+**Topic:** `"dex_cfg"` (`TOPIC_DEX_POOL_CONFIGURED`)
 
 Emitted after `set_dex_pool` updates the configured DEX pool address (Issue #228).
 
@@ -412,7 +536,7 @@ pub struct DexPoolConfiguredEvent {
 ## Upgrade Events
 
 ### 16. UpgradedEvent
-**Topic:** `"upgraded"`
+**Topic:** `"upgraded"` (`TOPIC_UPGRADED`)
 
 Emitted when the contract is upgraded to a new WASM implementation.
 
@@ -426,7 +550,7 @@ pub struct UpgradedEvent {
 Emitted by `execute_upgrade` once the upgrade timelock has elapsed (Issue #316).
 
 ### 16a. UpgradeScheduledEvent
-**Topic:** `"upg_sched"`
+**Topic:** `"upg_sched"` (`TOPIC_UPGRADE_SCHEDULED`)
 
 Emitted when an upgrade is scheduled via `schedule_upgrade` — step 1 of the
 two-step timelocked upgrade (Issue #316). The new WASM hash does not take effect
@@ -440,7 +564,7 @@ pub struct UpgradeScheduledEvent {
 ```
 
 ### 16b. UpgradeCancelledEvent
-**Topic:** `"upg_cncl"`
+**Topic:** `"upg_cncl"` (`TOPIC_UPGRADE_CANCELLED`)
 
 Emitted when a pending upgrade is cancelled via `cancel_upgrade` before it is
 executed — the recovery path against a malicious or mistaken schedule (Issue #316).
@@ -448,6 +572,51 @@ executed — the recovery path against a malicious or mistaken schedule (Issue #
 ```rust
 pub struct UpgradeCancelledEvent {
     pub cancelled_wasm_hash: BytesN<32>, // Hash of the WASM whose pending upgrade was cancelled
+}
+```
+
+## Declared but Never Emitted
+
+Two payload structs are part of the contract's `#[contracttype]` surface — so
+they appear in `contract-spec.json` and in generated client bindings — but are
+never published by any code path. **Do not subscribe to them**; no topic will
+ever fire.
+
+### PauseEvent
+
+A combined pause/unpause payload superseded by the three dedicated events above.
+`pause`, `unpause`, and `emergency_pause` publish `VaultPausedEvent`,
+`VaultUnpausedEvent`, and `EmergencyPausedEvent` respectively.
+
+```rust
+pub struct PauseEvent {
+    pub paused: bool,     // true if the vault is now paused, false if now unpaused
+    pub caller: Address,  // Address that triggered the pause/unpause transition
+}
+```
+
+### InitFailedEvent
+
+A failed `initialize` panics with a `VaultError` and the whole transaction is
+reverted, so no event survives to be indexed. Observe the transaction result
+code instead.
+
+```rust
+pub struct InitFailedEvent {
+    pub caller: Address,  // Address that attempted the initialization
+    pub reason: Symbol,   // Short reason code describing why initialization was rejected
+}
+```
+
+## Non-Event Payload Types
+
+`UserInfo` is a **return type**, not an event. It is returned by
+`get_user_info` and is never published to the event log.
+
+```rust
+pub struct UserInfo {
+    pub principal: i128,  // Deprecated: now the share-derived asset balance, not a separately stored principal record
+    pub shares: i128,     // The user's vault share balance (proportional ownership of TotalAssets)
 }
 ```
 
@@ -506,3 +675,24 @@ Event schemas are versioned to ensure backward compatibility:
 - Changing field types requires a major version bump
 
 Current event schema version: **v1**
+
+## Keeping This Document in Sync
+
+Event documentation lives in two places and must agree:
+
+1. The NatDoc on each `#[contracttype]` struct in
+   [`lib.rs`](neurowealth-vault/contracts/vault/src/lib.rs) — a `# Topics`
+   section naming the literal symbol and its `TOPIC_*` constant, plus a
+   one-line `///` description on **every** field.
+2. The corresponding section in this document.
+
+When adding an event or a field:
+
+- Declare the topic in
+  [`topics.rs`](neurowealth-vault/contracts/vault/src/topics.rs), never inline
+  at the emit site. Symbols are capped at 9 characters by `symbol_short!`.
+- Document every field on both sides, including units for `i128` amounts.
+- Add the event to this document in the section matching its category, keeping
+  the `(TOPIC_*)` annotation next to the literal symbol.
+- If the event publishes indexed topics beyond position 0, add a topic-tuple
+  table like the ones under `DepositEvent` and `WithdrawEvent`.

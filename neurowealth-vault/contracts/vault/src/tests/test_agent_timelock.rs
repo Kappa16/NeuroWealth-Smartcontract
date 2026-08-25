@@ -208,3 +208,205 @@ fn test_get_pending_agent_update_none_initially() {
         "no pending update should exist initially"
     );
 }
+
+// ─── Issue #513 ──────────────────────────────────────────────────────────────
+
+/// Pins the current behaviour when `confirm_agent_update()` is called well
+/// after the timelock expiry ledger has passed.
+///
+/// The timelock is a *minimum* delay, not a window with an upper deadline.
+/// Advancing many ledgers past `expiry` must still succeed — there is no
+/// `TimelockExpired` guard.
+#[test]
+fn test_confirm_agent_update_long_after_expiry_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _old_agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let new_agent = Address::generate(&env);
+    client.update_agent(&new_agent);
+
+    let (_, expiry) = client.get_pending_agent_update().unwrap();
+
+    // Advance the ledger 100 000 ledgers past the expiry.
+    env.ledger().set_sequence_number(expiry + 100_000);
+
+    // Must succeed — no upper deadline is enforced.
+    client.confirm_agent_update();
+
+    assert_eq!(
+        client.get_agent(),
+        new_agent,
+        "agent must be updated even when confirmed long after expiry"
+    );
+    assert!(
+        client.get_pending_agent_update().is_none(),
+        "pending state must be cleared after late confirmation"
+    );
+}
+
+// ─── Issue #514 ──────────────────────────────────────────────────────────────
+
+/// `cancel_agent_update()` panics with `NoTimelockPending` (#49) when called
+/// after a previous proposal was already cancelled — the slot is empty again.
+///
+/// This is distinct from the "never-proposed" variant: it verifies that the
+/// cancel path itself clears the pending slot so a second cancel has nothing
+/// to act on.
+#[test]
+#[should_panic(expected = "Error(Contract, #49)")]
+fn test_cancel_agent_update_after_prior_cancel_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let new_agent = Address::generate(&env);
+    // Propose, then cancel — pending slot is now empty.
+    client.update_agent(&new_agent);
+    client.cancel_agent_update();
+
+    assert!(
+        client.get_pending_agent_update().is_none(),
+        "pending state must be empty after first cancel"
+    );
+
+    // Cancelling again with no pending proposal must panic.
+    client.cancel_agent_update();
+}
+
+// ─── Issue #533 ──────────────────────────────────────────────────────────────
+
+/// `confirm_agent_update()` panics with `NoTimelockPending` (#49) when called
+/// after the pending proposal was already cancelled — the slot is empty again.
+///
+/// This verifies that cancel clears the pending state so that a subsequent
+/// confirm has nothing to act on.
+#[test]
+#[should_panic(expected = "Error(Contract, #49)")]
+fn test_confirm_after_cancel_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let new_agent = Address::generate(&env);
+    // Propose, then cancel — pending slot is now empty.
+    client.update_agent(&new_agent);
+    client.cancel_agent_update();
+
+    assert!(
+        client.get_pending_agent_update().is_none(),
+        "pending state must be empty after cancel"
+    );
+
+    // Confirming with no pending proposal must panic.
+    client.confirm_agent_update();
+}
+
+// ─── Issue #418 ──────────────────────────────────────────────────────────────
+
+/// Ownership transfer must NOT clear a pending agent update (cross-feature).
+///
+/// Sequence: owner proposes an agent update → owner initiates ownership
+/// transfer → new owner accepts → the pending agent update must still be
+/// visible, and the new owner can confirm it after the timelock expires.
+#[test]
+fn test_ownership_transfer_preserves_pending_agent_update() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, old_agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    // 1. Owner proposes an agent update (timelock starts).
+    let new_agent = Address::generate(&env);
+    client.update_agent(&new_agent);
+    let (pending_addr, expiry) = client.get_pending_agent_update().unwrap();
+    assert_eq!(pending_addr, new_agent, "pending agent should be recorded");
+
+    // 2. Owner initiates an ownership transfer to a new address.
+    let new_owner = Address::generate(&env);
+    client.transfer_ownership(&new_owner);
+
+    // 3. New owner accepts ownership.
+    client.accept_ownership(&new_owner);
+    assert_eq!(
+        client.get_owner(),
+        new_owner,
+        "ownership should transfer to the new owner"
+    );
+
+    // 4. The pending agent update must still be visible (NOT cleared by handoff).
+    let (pending_addr, pending_expiry) = client.get_pending_agent_update().unwrap();
+    assert_eq!(
+        pending_addr, new_agent,
+        "pending agent update must survive ownership transfer"
+    );
+    assert_eq!(
+        pending_expiry, expiry,
+        "pending agent update expiry must be preserved"
+    );
+    assert_eq!(
+        client.get_agent(),
+        old_agent,
+        "active agent must remain unchanged until confirmation"
+    );
+
+    // 5. The new owner can confirm the stale pending agent update.
+    env.ledger().set_sequence_number(pending_expiry);
+    client.confirm_agent_update();
+
+    assert_eq!(
+        client.get_agent(),
+        new_agent,
+        "new owner should be able to confirm the pending agent update"
+    );
+    assert!(
+        client.get_pending_agent_update().is_none(),
+        "pending state should be cleared after confirmation"
+    );
+}
+
+/// After an ownership transfer the new owner can instead cancel the pending
+/// agent update that survives the handoff.
+#[test]
+fn test_new_owner_can_cancel_surviving_pending_agent_update() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, old_agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    // Owner proposes an agent update, then transfers ownership.
+    let new_agent = Address::generate(&env);
+    client.update_agent(&new_agent);
+
+    let new_owner = Address::generate(&env);
+    client.transfer_ownership(&new_owner);
+    client.accept_ownership(&new_owner);
+
+    // Pending survives the handoff.
+    let (pending_addr, _) = client.get_pending_agent_update().unwrap();
+    assert_eq!(
+        pending_addr, new_agent,
+        "pending agent update must survive ownership transfer"
+    );
+
+    // New owner cancels the stale pending update.
+    client.cancel_agent_update();
+
+    assert_eq!(
+        client.get_agent(),
+        old_agent,
+        "active agent unchanged after cancel by new owner"
+    );
+    assert!(
+        client.get_pending_agent_update().is_none(),
+        "pending state cleared after cancel by new owner"
+    );
+}

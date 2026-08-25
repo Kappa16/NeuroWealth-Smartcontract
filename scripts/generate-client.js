@@ -293,6 +293,38 @@ function generateErrorEnum() {
 
   lines.push('} as const;', '');
   lines.push('export type VaultErrorCode = typeof VaultErrorCode[keyof typeof VaultErrorCode];', '');
+  lines.push('');
+  lines.push('/**');
+  lines.push(' * Typed error wrapping contract-level VaultError responses.');
+  lines.push(' *');
+  lines.push(' * Provides a `.code` property with the numeric error code and');
+  lines.push(' * preserves the original message.');
+  lines.push(' */');
+  lines.push('export class VaultError extends Error {');
+  lines.push('  readonly code: VaultErrorCode;');
+  lines.push('');
+  lines.push('  constructor(code: VaultErrorCode, message: string) {');
+  lines.push('    super(message);');
+  lines.push('    this.name = "VaultError";');
+  lines.push('    this.code = code;');
+  lines.push('  }');
+  lines.push('');
+  lines.push('  /**');
+  lines.push('   * Build a VaultError from a raw contract error object.');
+  lines.push('   * Handles both `{code, message}` shapes and raw string errors.');
+  lines.push('   */');
+  lines.push('  static fromContractError(error: unknown): VaultError {');
+  lines.push('    if (error && typeof error === "object" && "code" in error) {');
+  lines.push('      const obj = error as { code: number; message?: string };');
+  lines.push('      return new VaultError(obj.code as VaultErrorCode, obj.message ?? String(obj.code));');
+  lines.push('    }');
+  lines.push('    if (typeof error === "string") {');
+  lines.push('      return new VaultError(0 as VaultErrorCode, error);');
+  lines.push('    }');
+  lines.push('    return new VaultError(0 as VaultErrorCode, String(error));');
+  lines.push('  }');
+  lines.push('}');
+  lines.push('');
 
   return lines.join('\n');
 }
@@ -371,6 +403,18 @@ function generateClientClass() {
     '  // Internal helpers',
     '  // ------------------------------------------------------------------',
     '',
+    '  private throwVaultError(method: string, error: unknown): never {',
+    '    if (error instanceof VaultError) {',
+    '      throw error;',
+    '    }',
+    '',
+    '    const vaultError = VaultError.fromContractError(error);',
+    '    if (vaultError.message === `Vault contract error ${vaultError.code}`) {',
+    '      vaultError.message = `Vault contract error for ${method}`;',
+    '    }',
+    '    throw vaultError;',
+    '  }',
+    '',
     '  /**',
     '   * Build a contract invocation operation.',
     '   * @internal',
@@ -406,7 +450,7 @@ function generateClientClass() {
     '',
     '    const sim = await this.server.simulateTransaction(tx);',
     '    if (StellarSdk.SorobanRpc.Api.isSimulationError(sim)) {',
-    '      throw new Error(`Simulation failed for ${method}: ${sim.error}`);',
+    '      this.throwVaultError(method, sim.error ?? sim);',
     '    }',
     '    const resultEntry = (sim as StellarSdk.SorobanRpc.Api.SimulateTransactionSuccessResponse).result;',
     '    if (!resultEntry) return undefined as unknown as T;',
@@ -433,7 +477,7 @@ function generateClientClass() {
     '',
     '    const sim = await this.server.simulateTransaction(tx);',
     '    if (StellarSdk.SorobanRpc.Api.isSimulationError(sim)) {',
-    '      throw new Error(`Simulation failed for ${method}: ${sim.error}`);',
+    '      this.throwVaultError(method, sim.error ?? sim);',
     '    }',
     '',
     '    const prepared = StellarSdk.SorobanRpc.assembleTransaction(tx, sim).build();',
@@ -441,7 +485,7 @@ function generateClientClass() {
     '',
     '    const sendResp = await this.server.sendTransaction(prepared);',
     '    if (sendResp.status === \'ERROR\') {',
-    '      throw new Error(`Submit failed for ${method}: ${JSON.stringify(sendResp.errorResult)}`);',
+    '      this.throwVaultError(method, sendResp.errorResult ?? sendResp);',
     '    }',
     '',
     '    // Poll until confirmed',
@@ -453,7 +497,7 @@ function generateClientClass() {
     '      getResp = await this.server.getTransaction(sendResp.hash);',
     '    }',
     '    if (getResp.status === StellarSdk.SorobanRpc.Api.GetTransactionStatus.FAILED) {',
-    '      throw new Error(`Transaction failed for ${method}: ${JSON.stringify(getResp)}`);',
+    '      this.throwVaultError(method, getResp);',
     '    }',
     '',
     '    const retval = (getResp as StellarSdk.SorobanRpc.Api.GetSuccessfulTransactionResponse).returnValue;',

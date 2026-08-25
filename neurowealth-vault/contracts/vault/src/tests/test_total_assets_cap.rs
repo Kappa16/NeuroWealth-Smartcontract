@@ -14,6 +14,8 @@
 //! Checking `TotalDeposits` instead would allow over-subscription once yield grows
 //! the vault past the cap.
 
+extern crate std;
+
 use super::utils::*;
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
@@ -138,6 +140,165 @@ fn test_deposit_yield_withdraw_cap_regression() {
             "TotalAssets must not exceed TVL cap after deposit"
         );
     }
+}
+
+// ============================================================================
+// Cap-lowering-after-yield then raising scenario (issue #299 regression)
+// ============================================================================
+
+/// After yield accrual pushes `TotalAssets` past the TVL cap, a new deposit
+/// is rejected with error #41.  Raising the cap above the current
+/// `TotalAssets` must re-open deposits.  All three phases are verified in a
+/// single continuous environment so that vault state carries across steps.
+///
+/// This is the canonical regression for the cap-lowering-after-yield scenario
+/// called out in issue #299.  It proves three things:
+///   (a) deposit is blocked with #41 once `TotalAssets > cap` after yield
+///   (b) lowering the cap further keeps deposits blocked
+///   (c) raising the cap above `TotalAssets` unblocks deposits again
+///
+/// The final assertion (`TotalDeposits != TotalAssets`) also acts as a
+/// lint that the guard is reading `TotalAssets` and not the cheaper
+/// `TotalDeposits` counter — if the implementation regressed to
+/// `TotalDeposits` the step-5 deposit would be over-allowed and the
+/// post-condition arithmetic would diverge.
+#[test]
+fn test_tvl_cap_lowered_after_yield_then_raised_allows_deposit() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+
+    // ── Step 1: initial cap = 12 USDC; user1 deposits 10 USDC ────────────
+    // After deposit:  TotalAssets = 10, TotalDeposits = 10
+    let initial_cap = 12_000_000_i128; // 12 USDC (7 dp)
+    client.set_tvl_cap(&initial_cap);
+
+    let user1 = Address::generate(&env);
+    let first_deposit = 10_000_000_i128; // 10 USDC
+    mint_and_deposit(&env, &client, &usdc_token, &user1, first_deposit);
+
+    assert_eq!(client.get_total_assets(), first_deposit);
+    assert_eq!(client.get_total_deposits(), first_deposit);
+
+    // ── Step 2: accrue 3 USDC yield → TotalAssets = 13 > cap (12) ────────
+    // TotalDeposits stays at 10 (principal-only counter, issue #299).
+    let yield_amount = 3_000_000_i128; // 3 USDC
+    token_client.mint(&contract_id, &yield_amount);
+    client.update_total_assets(&agent, &(first_deposit + yield_amount), &false, &0);
+
+    assert_eq!(client.get_total_assets(), 13_000_000_i128);
+    assert_eq!(
+        client.get_total_deposits(),
+        first_deposit,
+        "TotalDeposits must not change on yield accrual"
+    );
+
+    // ── Step 3: deposit while TotalAssets > cap must be rejected ──────────
+    // Mint tokens for user2 outside the vault; the deposit itself must panic.
+    let user2 = Address::generate(&env);
+    token_client.mint(&user2, &1_000_000_i128);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.deposit(&user2, &1_000_000_i128);
+    }));
+    assert!(
+        result.is_err(),
+        "deposit must be rejected (#41) when TotalAssets already exceeds the cap"
+    );
+    // Vault must be unchanged after the rejected call.
+    assert_eq!(
+        client.get_total_assets(),
+        13_000_000_i128,
+        "TotalAssets must not change after a rejected deposit"
+    );
+
+    // ── Step 4: owner lowers cap to 10 USDC — still below TotalAssets ─────
+    // Deposits must remain blocked because TotalAssets (13) > new cap (10).
+    let lower_cap = 10_000_000_i128; // 10 USDC
+    client.set_tvl_cap(&lower_cap);
+
+    let user3 = Address::generate(&env);
+    token_client.mint(&user3, &1_000_000_i128);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        client.deposit(&user3, &1_000_000_i128);
+    }));
+    assert!(
+        result.is_err(),
+        "deposit must remain blocked after cap is lowered below TotalAssets"
+    );
+
+    // ── Step 5: owner raises cap to 20 USDC > TotalAssets (13) ───────────
+    // A 2 USDC deposit must now succeed:
+    //   new TotalAssets = 13 + 2 = 15  ≤  20 (cap)
+    let raised_cap = 20_000_000_i128; // 20 USDC
+    client.set_tvl_cap(&raised_cap);
+
+    let user4 = Address::generate(&env);
+    let new_deposit = 2_000_000_i128; // 2 USDC
+    mint_and_deposit(&env, &client, &usdc_token, &user4, new_deposit);
+
+    assert_eq!(
+        client.get_total_assets(),
+        15_000_000_i128,
+        "TotalAssets must include the new deposit"
+    );
+    assert!(
+        client.get_total_assets() <= raised_cap,
+        "TotalAssets must not exceed the raised cap"
+    );
+
+    // TotalDeposits = 10 (original) + 2 (step 5) = 12.
+    // TotalAssets = 15 (13 yield-inflated + 2 new deposit).
+    // The gap (15 vs 12) proves the guard evaluated TotalAssets, not TotalDeposits:
+    // if the guard had used TotalDeposits (12) the step-3/4 deposits would not
+    // have been blocked, and TotalDeposits would be higher here.
+    assert_eq!(
+        client.get_total_deposits(),
+        first_deposit + new_deposit, // 12 USDC principal
+        "TotalDeposits must only reflect principal"
+    );
+    assert!(
+        client.get_total_assets() > client.get_total_deposits(),
+        "TotalAssets must exceed TotalDeposits due to unrealised yield"
+    );
+}
+
+/// Minimal `#[should_panic]` companion: a single deposit panics with #41
+/// when `TotalAssets` (not `TotalDeposits`) is already above the cap after
+/// yield accrual.
+///
+/// If `require_within_tvl_cap` regressed to comparing against `TotalDeposits`
+/// this test would NOT panic — the deposit would silently succeed and the
+/// `#[should_panic]` attribute would cause the test to fail.
+#[test]
+#[should_panic(expected = "Error(Contract, #41)")]
+fn test_tvl_cap_blocks_deposit_when_yield_already_exceeds_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+
+    // cap = 10 USDC; deposit 8 USDC  →  TotalDeposits = 8  (under cap)
+    let cap = 10_000_000_i128;
+    client.set_tvl_cap(&cap);
+
+    let user1 = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user1, 8_000_000_i128);
+
+    // Accrue 3 USDC yield → TotalAssets = 11  (above cap)
+    // TotalDeposits is still 8 — below the cap.
+    // The guard MUST use TotalAssets and reject the next deposit.
+    token_client.mint(&contract_id, &3_000_000_i128);
+    client.update_total_assets(&agent, &11_000_000_i128, &false, &0);
+
+    // This deposit must panic with #41 because TotalAssets (11) > cap (10).
+    // It would NOT panic if the guard mistakenly checked TotalDeposits (8).
+    let user2 = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user2, 1_000_000_i128);
 }
 
 // ============================================================================

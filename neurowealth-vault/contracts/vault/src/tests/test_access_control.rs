@@ -123,13 +123,23 @@ fn test_update_agent_emits_event() {
     client.update_agent(&new_agent);
 
     let agent_events = find_events_by_topic(env.events().all(), &env, TOPIC_AGENT_UPDATED);
-    assert_eq!(agent_events.len(), 1, "Exactly one agent event should be emitted");
+    assert_eq!(
+        agent_events.len(),
+        1,
+        "Exactly one agent event should be emitted"
+    );
 
     let (_, _, data) = &agent_events[0];
-    let event = AgentUpdatedEvent::try_from_val(&env, data)
-        .expect("Should be a valid AgentUpdatedEvent");
-    assert_eq!(event.old_agent, old_agent, "old_agent should match previous agent");
-    assert_eq!(event.new_agent, new_agent, "new_agent should match updated agent");
+    let event =
+        AgentUpdatedEvent::try_from_val(&env, data).expect("Should be a valid AgentUpdatedEvent");
+    assert_eq!(
+        event.old_agent, old_agent,
+        "old_agent should match previous agent"
+    );
+    assert_eq!(
+        event.new_agent, new_agent,
+        "new_agent should match updated agent"
+    );
 }
 
 #[test]
@@ -220,6 +230,98 @@ fn test_non_owner_cannot_set_limits() {
         result.is_err(),
         "set_limits must reject calls without the owner's authorization"
     );
+}
+
+/// `set_user_deposit_cap` must reject non-owner callers. Mirrors the
+/// `set_deposit_limits` pattern: revoke all auth and assert the try_* call
+/// returns an error.
+#[test]
+fn test_non_owner_cannot_set_user_deposit_cap() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let _non_owner = Address::generate(&env);
+    env.mock_auths(&[]);
+
+    let result = client.try_set_user_deposit_cap(&10_000_000_000_i128);
+    assert!(
+        result.is_err(),
+        "set_user_deposit_cap must reject calls without the owner's authorization"
+    );
+}
+
+/// `set_caps` is owner-only. Revoke all auth and verify the call fails.
+#[test]
+fn test_non_owner_cannot_set_caps() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let _non_owner = Address::generate(&env);
+    env.mock_auths(&[]);
+
+    let result = client.try_set_caps(&1_000_000_i128, &50_000_000_000_i128);
+    assert!(
+        result.is_err(),
+        "set_caps must reject calls without the owner's authorization"
+    );
+}
+
+/// `set_rebalance_cooldown` is owner-only via `require_is_owner`.
+#[test]
+fn test_non_owner_cannot_set_rebalance_cooldown() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let _non_owner = Address::generate(&env);
+    env.mock_auths(&[]);
+
+    let result = client.try_set_rebalance_cooldown(&10_u32);
+    assert!(
+        result.is_err(),
+        "set_rebalance_cooldown must reject calls without the owner's authorization"
+    );
+}
+
+/// `set_approval_ttl` must reject non-owner callers (owner guard via
+/// `require_is_owner`). Use the try_ wrapper to check the error path.
+#[test]
+fn test_non_owner_cannot_set_approval_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let _non_owner = Address::generate(&env);
+    env.mock_auths(&[]);
+
+    let result = client.try_set_approval_ttl(&2_000_u32);
+    assert!(
+        result.is_err(),
+        "set_approval_ttl must reject calls without the owner's authorization"
+    );
+}
+
+#[test]
+#[should_panic(expected = "vault: only owner can set blend approval ttl")]
+fn test_non_owner_cannot_set_blend_approval_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let non_owner = Address::generate(&env);
+    client.set_blend_approval_ttl(&non_owner, &42_u32);
 }
 
 #[test]
@@ -453,6 +555,62 @@ fn test_new_owner_can_use_owner_functions_after_transfer() {
     assert!(!client.is_paused());
 }
 
+/// Test that the pending owner cannot cancel an ownership transfer (Issue #573).
+/// Only the current owner should be able to cancel, preventing griefing of
+/// legitimate ownership rotations.
+#[test]
+fn test_pending_owner_cannot_cancel_ownership_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let pending_owner = Address::generate(&env);
+    client.transfer_ownership(&pending_owner);
+
+    assert_eq!(client.get_pending_owner().unwrap(), pending_owner);
+
+    // The pending owner tries to cancel — should fail with CallerIsNotOwner
+    let result = client.try_cancel_ownership_transfer();
+    assert!(
+        result.is_err(),
+        "pending owner should not be able to cancel ownership transfer"
+    );
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(34))),
+        "should fail with CallerIsNotOwner error"
+    );
+}
+
+/// Test that an uninvolved third party cannot cancel an ownership transfer (Issue #573).
+/// Only the current owner should be able to cancel.
+#[test]
+fn test_third_party_cannot_cancel_ownership_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let pending_owner = Address::generate(&env);
+    client.transfer_ownership(&pending_owner);
+
+    // An uninvolved third party tries to cancel — should fail with CallerIsNotOwner
+    let third_party = Address::generate(&env);
+    let result = client.try_cancel_ownership_transfer();
+    assert!(
+        result.is_err(),
+        "third party should not be able to cancel ownership transfer"
+    );
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(34))),
+        "should fail with CallerIsNotOwner error"
+    );
+}
+
 #[test]
 #[should_panic(expected = "Error(Contract, #19)")]
 fn test_old_owner_cannot_use_owner_functions_after_transfer() {
@@ -511,7 +669,8 @@ fn test_wrong_address_cannot_accept_ownership() {
 }
 
 #[test]
-#[should_panic(expected = "vault: no pending owner")]
+// No pending transfer -> accept_ownership rejects with VaultError::CallerIsNotPendingOwner (code 29).
+#[should_panic(expected = "Error(Contract, #29)")]
 fn test_accept_ownership_without_pending_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -545,7 +704,7 @@ fn test_cancel_ownership_transfer_clears_pending() {
 }
 
 #[test]
-#[should_panic(expected = "vault: no pending owner to cancel")]
+#[should_panic(expected = "Error(Contract, #29)")]
 fn test_cancel_without_pending_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -553,12 +712,14 @@ fn test_cancel_without_pending_panics() {
     let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
-    // No pending transfer started
+    // No pending transfer started — expects VaultError::CallerIsNotPendingOwner (code 29)
     client.cancel_ownership_transfer();
 }
 
 #[test]
-#[should_panic(expected = "vault: no pending owner")]
+// #538: once a transfer is cancelled the pending state is cleared, so a later
+// accept_ownership rejects with VaultError::CallerIsNotPendingOwner (code 29).
+#[should_panic(expected = "Error(Contract, #29)")]
 fn test_accept_after_cancel_panics() {
     let env = Env::default();
     env.mock_all_auths();
@@ -769,4 +930,228 @@ fn test_agent_cannot_pause_owner_role_is_exclusive() {
 
     // agent != owner — the explicit assert_eq! in pause() must reject this
     client.pause(&agent);
+}
+
+// ============================================================================
+// ISSUE #571 — ADVERSARIAL SWEEP: AGENT CANNOT CALL OWNER-ONLY SETTERS
+//              DURING TIMELOCK WINDOWS (NORMAL AND PENDING STATES)
+// ============================================================================
+
+/// Comprehensive adversarial test: exhaustively verify that the agent cannot
+/// invoke any owner-only setter during normal (no-timelock) or pending-timelock
+/// states. Each setter is a critical security boundary.
+#[test]
+#[should_panic(expected = "Error(Contract, #19)")]
+fn test_agent_cannot_pause_during_normal_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.pause(&agent);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_agent_cannot_unpause_during_normal_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.pause(&owner);
+    client.unpause(&agent);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #22)")]
+fn test_agent_cannot_emergency_pause_during_normal_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.emergency_pause(&agent);
+}
+
+#[test]
+fn test_agent_cannot_set_tvl_cap_during_normal_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let result = client.try_set_tvl_cap(&50_000_000_000_i128);
+    assert!(
+        result.is_err(),
+        "agent must not be able to set TVL cap during normal state"
+    );
+}
+
+#[test]
+fn test_agent_cannot_set_user_deposit_cap_during_normal_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let result = client.try_set_user_deposit_cap(&10_000_000_000_i128);
+    assert!(
+        result.is_err(),
+        "agent must not be able to set user deposit cap during normal state"
+    );
+}
+
+#[test]
+fn test_agent_cannot_set_deposit_limits_during_normal_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let result = client.try_set_deposit_limits(&2_000_000_i128, &50_000_000_000_i128);
+    assert!(
+        result.is_err(),
+        "agent must not be able to set deposit limits during normal state"
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #34)")]
+fn test_agent_cannot_schedule_upgrade_during_normal_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let fake_wasm_hash = BytesN::from_array(&env, &[0u8; 32]);
+    client.schedule_upgrade(&agent, &fake_wasm_hash);
+}
+
+#[test]
+fn test_agent_cannot_set_rebalance_cooldown_during_normal_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let result = client.try_set_rebalance_cooldown(&10_u32);
+    assert!(
+        result.is_err(),
+        "agent must not be able to set rebalance cooldown during normal state"
+    );
+}
+
+#[test]
+fn test_agent_cannot_set_approval_ttl_during_normal_state() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let result = client.try_set_approval_ttl(&2_000_u32);
+    assert!(
+        result.is_err(),
+        "agent must not be able to set approval TTL during normal state"
+    );
+}
+
+/// After an agent update is proposed (pending timelock), the agent STILL cannot
+/// call owner-only setters during the timelock window.
+#[test]
+#[should_panic(expected = "Error(Contract, #19)")]
+fn test_agent_cannot_pause_during_pending_agent_timelock() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let new_agent = Address::generate(&env);
+    client.update_agent(&new_agent);
+
+    // Pending timelock is now active (agent update proposed but not confirmed).
+    // The old agent should still not be able to pause.
+    client.pause(&agent);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #20)")]
+fn test_agent_cannot_unpause_during_pending_agent_timelock() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.pause(&owner);
+
+    let new_agent = Address::generate(&env);
+    client.update_agent(&new_agent);
+
+    // During pending timelock, agent should not be able to unpause.
+    client.unpause(&agent);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #22)")]
+fn test_agent_cannot_emergency_pause_during_pending_agent_timelock() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let new_agent = Address::generate(&env);
+    client.update_agent(&new_agent);
+
+    // During pending timelock, agent should not be able to emergency pause.
+    client.emergency_pause(&agent);
+}
+
+#[test]
+fn test_agent_cannot_set_tvl_cap_during_pending_agent_timelock() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let new_agent = Address::generate(&env);
+    client.update_agent(&new_agent);
+
+    // During pending timelock, agent cannot set TVL cap.
+    let result = client.try_set_tvl_cap(&50_000_000_000_i128);
+    assert!(
+        result.is_err(),
+        "agent must not be able to set TVL cap during pending agent timelock"
+    );
+}
+
+#[test]
+fn test_agent_cannot_set_deposit_limits_during_pending_agent_timelock() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let new_agent = Address::generate(&env);
+    client.update_agent(&new_agent);
+
+    // During pending timelock, agent cannot set deposit limits.
+    let result = client.try_set_deposit_limits(&2_000_000_i128, &50_000_000_000_i128);
+    assert!(
+        result.is_err(),
+        "agent must not be able to set deposit limits during pending agent timelock"
+    );
 }

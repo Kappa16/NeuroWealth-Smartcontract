@@ -1,0 +1,258 @@
+================================================================================
+NeuroWealth Cross-Chain Bridge Architecture
+Phase 3: Stellar ↔ Ethereum via Axelar
+================================================================================
+
+OVERVIEW
+--------
+The bridge enables seamless cross-chain transfer of USDC between Stellar and
+Ethereum using Axelar's General Message Passing (GMP) protocol.
+
+Flow: User (Ethereum) → Axelar → Vault (Stellar)
+
+SUPPORTED FLOWS
+---------------
+
+1. ETHEREUM → STELLAR (Deposit)
+   1. User initiates deposit on Ethereum dApp (via eth-bridge-connector)
+   2. USDC transferred to bridge contract on Ethereum
+   3. Bridge emits event with destination Stellar address
+   4. Axelar relayers pick up event and sign it
+   5. Axelar GMP message submitted to Stellar
+   6. Vault contract receives GMP message verification
+   7. User receives USDC in Stellar vault (minus bridge fee)
+
+2. STELLAR → ETHEREUM (Withdraw)
+   1. User initiates withdrawal via vault UI
+   2. Vault contract holds shares for burning
+   3. Vault contract sends withdrawal request to bridge
+   4. Bridge verifies Stellar transaction
+   5. Axelar relayers bridge USDC to Ethereum
+   6. User receives USDC on Ethereum (minus bridge fee)
+
+KEY COMPONENTS
+--------------
+
+BridgeManager
+  - Orchestrates transfer initiation (Stellar/Ethereum)
+  - Executes via Axelar GMP
+  - Polls transfer status
+  - Handles retries and timeouts
+  - Validates amounts against min/max
+
+BridgeStore
+  - Persistent storage for bridge transfers
+  - In-memory (development) or SQL (production)
+  - Tracks: ID, status, addresses, amounts, hashes, retries
+
+BridgeMonitor
+  - Continuous monitoring of pending transfers
+  - Auto-retry failed transfers (up to 3x)
+  - Timeout detection (30 minutes)
+  - Health metrics (confirmation time, failure rate)
+
+SECURITY MODEL
+--------------
+
+Key Assumptions:
+  ✓ Axelar network is trusted (uses threshold signatures)
+  ✓ Ethereum smart contracts are audited
+  ✓ Stellar vault is non-custodial (users hold private keys)
+  ✓ All bridge operations are transparent and auditable
+
+Protections:
+  1. Amount Validation
+     - Min bridge amount: $100 USDC
+     - Max bridge amount: $100,000 USDC
+     - Prevents dust transfers and caps exposure
+
+  2. Fee Collection
+     - 0.5% bridge fee (configurable)
+     - Covers Axelar relayer costs + platform fee
+     - Users see exact netAmount before confirmation
+
+  3. Timeout Handling
+     - 30-minute timeout on pending transfers
+     - Auto-fails if no confirmation
+     - Funds can be manually recovered via cancel_bridge
+
+  4. Signature Verification
+     - Axelar relayer signatures verified via ECDSA
+     - Invalid signatures rejected
+     - Prevents relay attacks
+
+  5. Audit Trail
+     - All transfers logged to bridge_audit_log
+     - Event types: initiated, submitted, confirmed, failed
+     - Queryable for compliance/forensics
+
+  6. Rate Limiting
+     - Per-user rate limits (optional)
+     - Per-bridge limits to prevent congestion
+     - Protects against spam/griefing
+
+FAILURE MODES & RECOVERY
+------------------------
+
+Scenario 1: Bridge transfer stuck in "pending"
+  Cause: Source chain transaction not picked up by relayers
+  Action: Manual retry after 1 hour
+  Prevention: Monitor bridge_transfers table, alert after 5 min
+
+Scenario 2: Axelar relayer failed to sign
+  Cause: Axelar network congestion or temporary outage
+  Action: Automatic retry (up to 3x) with exponential backoff
+  Prevention: Use multiple Axelar validators, geographic diversity
+
+Scenario 3: Destination chain rejection
+  Cause: Contract upgrade, governance change, or attacked contract
+  Action: Manual investigation, potential fund recovery
+  Prevention: Governance approval before major changes, circuit breaker
+
+Scenario 4: Incorrect amount delivered
+  Cause: Precision loss or slippage calculation error
+  Action: Manual audit via Axelarscan, recovery transaction
+  Prevention: Comprehensive testing on testnet, staged rollout
+
+MONITORING & ALERTS
+-------------------
+
+Critical Alerts:
+  - Transfer timeout (30 min elapsed, still pending)
+  - Relayer signature verification failed
+  - Destination amount mismatch
+  - Repeated retries exceeding 3 attempts
+
+Warning Alerts:
+  - High failure rate (>10% in past hour)
+  - Unusual bridge volume spike
+  - Axelar network latency (>15 min confirmation)
+
+Metrics to Track:
+  - Average confirmation time (target: <10 min)
+  - Success rate (target: >99%)
+  - Bridge volume (daily, hourly)
+  - Fee revenue (USD equivalent)
+  - Failed transfers (cumulative)
+
+TESTING CHECKLIST
+-----------------
+
+Unit Tests:
+  [ ] BridgeManager.initiateEthereumDeposit()
+  [ ] BridgeManager.initiateStellarWithdraw()
+  [ ] BridgeManager.executeAxelarTransfer()
+  [ ] BridgeManager.pollTransferStatus()
+  [ ] BridgeManager.verifyAxelarSignature()
+  [ ] BridgeStore.save/get/update/getPending()
+
+Integration Tests:
+  [ ] End-to-end Ethereum → Stellar deposit
+  [ ] End-to-end Stellar → Ethereum withdrawal
+  [ ] Fee calculation accuracy
+  [ ] Timeout detection
+  [ ] Auto-retry mechanism
+  [ ] Monitor health checks
+
+Testnet Deployment:
+  [ ] Deploy bridge contracts to Ethereum Sepolia
+  [ ] Deploy vault to Stellar Testnet
+  [ ] Register with Axelar testnet
+  [ ] Run 100 successful transfers
+  [ ] Test failure scenarios (timeout, rejection, invalid sig)
+  [ ] Load test (10 concurrent transfers)
+
+Mainnet Checklist:
+  [ ] Axelar mainnet integration complete
+  [ ] All security audits passed
+  [ ] Insurance/coverage in place for bridge
+  [ ] Admin key in multisig with rate limits
+  [ ] Monitor 24/7 during first week
+  [ ] Kill switch (pause bridge) documented
+  [ ] User communication prepared
+  [ ] Emergency response runbook ready
+
+AXELAR INTEGRATION DETAILS
+---------------------------
+
+GMP Message Flow:
+  1. Source Chain: User → Bridge Contract (transfer + message)
+  2. Axelar Hub: Collect signatures from validator set
+  3. Destination Chain: Execute with >= 2/3 weighted signatures
+  4. Vault: Process GMP, mint/burn shares
+
+Payload Format (hex-encoded JSON):
+  {
+    "version": 1,
+    "transferId": "uuid",
+    "user": "G... or 0x...",
+    "amount": "50000000000",
+    "destinationChain": "stellar",
+    "timestamp": 1234567890
+  }
+
+Gas Estimation:
+  - Ethereum: ~300,000 gas (deposit) + relayer fee
+  - Stellar: ~100,000 stroops (confirmation)
+  - Axelar: Baked into bridge fee (0.5%)
+
+Key Addresses (Mainnet):
+  - Axelar GMP Address: <will be provided by Axelar>
+  - Gas Service: <will be provided by Axelar>
+  - Token Bridge: <will be provided by Axelar>
+
+API Endpoints (Axelar Testnet):
+  - Status: https://testnet.axelarscan.io
+  - API: https://api-testnet.axelarscan.io
+  - Faucet: https://testnet.axelar.dev
+
+DEPLOYMENT STEPS
+----------------
+
+1. Register with Axelar
+   - Submit contracts for whitelisting
+   - Configure supported chains (Stellar + Ethereum)
+   - Obtain GMP contract addresses
+
+2. Deploy Contracts
+   - Ethereum: Bridge contract → NeuroWealth multisig
+   - Stellar: GMP handler in vault contract
+   - Update bridge manager config
+
+3. Configure & Test
+   - Set fee levels (0.5% recommended)
+   - Set amount limits (min $100, max $100k)
+   - Run integration tests on testnet
+   - Verify with Axelar team
+
+4. Soft Launch (Limited)
+   - Enable for beta users only
+   - Monitor for 48 hours
+   - Collect feedback
+   - Adjust parameters if needed
+
+5. Full Launch
+   - Announce to user base
+   - Enable for all users
+   - Monitor 24/7 for first week
+   - Publish transparency report
+
+FUTURE ENHANCEMENTS
+-------------------
+
+Phase 3.1: Additional Chains
+  - Add Polygon, Arbitrum, Avalanche
+  - Unified liquidity pool across chains
+  - Cross-chain yield arbitrage
+
+Phase 3.2: Advanced Features
+  - Bridge-native AMM (swap + bridge in one tx)
+  - Yield farming across chains
+  - Cross-chain portfolio rebalancing
+
+Phase 3.3: Optimization
+  - Reduce bridge fees via batch processing
+  - Faster confirmation via validator set expansion
+  - Native token swaps (XLM ↔ ETH)
+
+================================================================================

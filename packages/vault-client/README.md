@@ -116,7 +116,7 @@ await client.rebalance(
 
 ## API reference
 
-All 54 contract functions are available as methods on `VaultClient`. They fall into two categories:
+All 65 contract functions are available as methods on `VaultClient`. They fall into two categories:
 
 ### Query methods (read-only)
 
@@ -130,9 +130,15 @@ Signature: `method(...contractParams, sourcePublicKey: string): Promise<ReturnTy
 | `get_total_assets` | `bigint` | Principal + accrued yield |
 | `get_total_shares` | `bigint` | Total shares outstanding |
 | `get_exchange_rate` | `bigint` | Assets per share × 10⁷ |
+| `get_idle_balance` | `bigint` | Idle USDC held directly in contract |
+| `get_deployed_assets` | `bigint` | USDC deployed in active yield protocol |
+| `get_asset_breakdown` | `[bigint, bigint]` | Tuple of (idle, deployed) USDC |
 | `get_owner` | `string` | Contract owner address |
 | `get_agent` | `string` | Authorized agent address |
+| `get_pending_agent_update` | `unknown \| null` | Pending agent update proposal info |
+| `get_pending_upgrade` | `unknown \| null` | Pending contract upgrade proposal info |
 | `get_user_info` | `UserInfo` | Full user snapshot |
+| `get_user_strategy` | `string` | User yield strategy preference |
 | `is_paused` | `boolean` | Vault pause state |
 | `get_tvl_cap` | `bigint` | Current TVL cap |
 | `get_user_deposit_cap` | `bigint` | Per-user deposit cap |
@@ -165,6 +171,7 @@ Signature: `method(signer: Keypair, ...contractParams): Promise<TxResult<ReturnT
 | `deposit` | public | Deposit USDC, receive shares |
 | `withdraw` | public | Burn shares, receive USDC |
 | `withdraw_all` | public | Redeem all shares |
+| `set_user_strategy` | public | Set user investment strategy preference |
 | `rebalance` | agent-only | Reallocate to yield protocol |
 | `update_total_assets` | agent-only | Sync yield accounting |
 | `pause` | owner-only | Emergency pause |
@@ -179,10 +186,15 @@ Signature: `method(signer: Keypair, ...contractParams): Promise<TxResult<ReturnT
 | `set_blend_approval_ttl` | owner-only | Set Blend approval TTL |
 | `set_approval_ttl` | owner-only | Set token approval TTL |
 | `set_rebalance_cooldown` | owner-only | Set rebalance cooldown |
-| `update_agent` | owner-only | Rotate agent address |
+| `update_agent` | owner-only | Propose agent update (timelock step 1) |
+| `confirm_agent_update` | owner-only | Confirm agent update (timelock step 2) |
+| `cancel_agent_update` | owner-only | Cancel pending proposed agent update |
 | `transfer_ownership` | owner-only | Initiate 2-step transfer |
 | `accept_ownership` | pending-owner | Complete transfer |
 | `cancel_ownership_transfer` | owner-only | Cancel pending transfer |
+| `schedule_upgrade` | owner-only | Schedule contract WASM code upgrade (timelock step 1) |
+| `execute_upgrade` | owner-only | Execute scheduled upgrade (timelock step 2) |
+| `cancel_upgrade` | owner-only | Cancel pending contract upgrade proposal |
 | `upgrade` | owner-only | Upgrade contract WASM |
 | `set_limits` | owner-only | ⚠️ Deprecated — use `set_caps` |
 
@@ -243,7 +255,7 @@ const DECIMAL_PLACES:           number; // 7
 
 ## Event types
 
-All 28 contract events are exported as TypeScript interfaces (e.g. `DepositEvent`, `RebalanceEvent`, `AssetsUpdatedEvent`). Use them when parsing Soroban event streams:
+All 34 contract events are exported as TypeScript interfaces (e.g. `DepositEvent`, `RebalanceEvent`, `AssetsUpdatedEvent`). Use them when parsing Soroban event streams:
 
 ```typescript
 import type { DepositEvent } from '@neurowealth/vault-client';
@@ -253,6 +265,96 @@ function handleDepositEvent(raw: unknown): DepositEvent {
   return raw as DepositEvent;
 }
 ```
+
+### Event Listener
+
+`VaultEventListener` wraps Soroban RPC event streaming with type-safe handlers for each event:
+
+```typescript
+import { VaultEventListener } from '@neurowealth/vault-client';
+import * as StellarSdk from '@stellar/stellar-sdk';
+
+const server = new StellarSdk.SorobanRpc.Server('https://soroban-testnet.stellar.org');
+
+const listener = new VaultEventListener({
+  contractId: 'C...YOUR_CONTRACT_ADDRESS',
+  server,
+  networkPassphrase: StellarSdk.Networks.TESTNET,
+});
+
+// Type-safe handlers for each event
+listener.onDeposit((event) => {
+  console.log(`Deposit: ${event.user} deposited ${event.amount} USDC`);
+});
+
+listener.onWithdraw((event) => {
+  console.log(`Withdraw: ${event.user} withdrew ${event.amount} USDC`);
+});
+
+listener.onRebalance((event) => {
+  console.log(`Rebalance: ${event.protocol} status=${event.status}`);
+});
+
+listener.onRebalanceFailed((event) => {
+  console.log(`Rebalance failed: ${event.from_protocol} — ${event.reason}`);
+});
+
+listener.onAgentUpdateProposed((event) => {
+  console.log(`Agent update proposed: ${event.old_agent} -> ${event.new_agent}`);
+});
+
+listener.onUpgraded((event) => {
+  console.log(`Upgraded: v${event.old_version} -> v${event.new_version}`);
+});
+
+// Start listening (polls every 5 seconds)
+await listener.start();
+
+// Filter by user address
+listener.onDeposit((event) => {
+  console.log(`User deposit: ${event.amount}`);
+}, 'GABC...USER_ADDRESS');
+
+// Stop when done
+listener.stop();
+```
+
+**Available handler methods:**
+
+| Method | Event Type | User Filter |
+|---|---|---|
+| `onDeposit` | `DepositEvent` | Optional |
+| `onWithdraw` | `WithdrawEvent` | Optional |
+| `onRebalance` | `RebalanceEvent` | - |
+| `onRebalanceFailed` | `RebalanceFailedEvent` | - |
+| `onProtocolChanged` | `ProtocolChangedEvent` | - |
+| `onInitialized` | `VaultInitializedEvent` | - |
+| `onPaused` | `VaultPausedEvent` | - |
+| `onUnpaused` | `VaultUnpausedEvent` | - |
+| `onEmergencyPaused` | `EmergencyPausedEvent` | - |
+| `onTvlCapUpdated` | `TvlCapUpdatedEvent` | - |
+| `onUserDepositCapUpdated` | `UserDepositCapUpdatedEvent` | - |
+| `onCapsUpdated` | `CapsUpdatedEvent` | - |
+| `onLimitsUpdated` | `LimitsUpdatedEvent` | - |
+| `onDepositLimitsUpdated` | `DepositLimitsUpdatedEvent` | - |
+| `onAgentUpdated` | `AgentUpdatedEvent` | - |
+| `onAgentUpdateProposed` | `AgentUpdateProposedEvent` | - |
+| `onAgentUpdateConfirmed` | `AgentUpdateConfirmedEvent` | - |
+| `onAgentUpdateCancelled` | `AgentUpdateCancelledEvent` | - |
+| `onOwnershipInitiated` | `OwnershipTransferInitiatedEvent` | - |
+| `onOwnershipTransferred` | `OwnershipTransferredEvent` | - |
+| `onOwnershipCancelled` | `OwnershipTransferCancelledEvent` | - |
+| `onAssetsUpdated` | `AssetsUpdatedEvent` | - |
+| `onUpgraded` | `UpgradedEvent` | - |
+| `onUpgradeScheduled` | `UpgradeScheduledEvent` | - |
+| `onUpgradeCancelled` | `UpgradeCancelledEvent` | - |
+| `onBlendSupply` | `BlendSupplyEvent` | - |
+| `onBlendWithdraw` | `BlendWithdrawEvent` | - |
+| `onBlendPoolConfigured` | `BlendPoolConfiguredEvent` | - |
+| `onDexSupply` | `DexSupplyEvent` | - |
+| `onDexWithdraw` | `DexWithdrawEvent` | - |
+| `onDexPoolConfigured` | `DexPoolConfiguredEvent` | - |
+| `onUserStrategyUpdated` | `UserStrategyUpdatedEvent` | Optional |
 
 ---
 
@@ -277,6 +379,7 @@ packages/vault-client/
 ├── README.md
 └── src/
     ├── index.ts                  ← public barrel export
+    ├── event-listener.ts         ← VaultEventListener for Soroban event streaming
     └── generated/
         └── vault.ts              ← AUTO-GENERATED, do not edit
 ```

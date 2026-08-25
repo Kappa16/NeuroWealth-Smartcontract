@@ -28,6 +28,59 @@ fn test_agent_can_rebalance_with_custom_protocol() {
 }
 
 #[test]
+fn test_rebalance_to_same_blend_protocol_with_zero_idle_balance_is_noop() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, usdc_token, blend_pool) =
+        setup_vault_with_token_and_blend(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+    let blend_client = MockBlendPoolClient::new(&env, &blend_pool);
+
+    client.set_blend_pool(&owner, &blend_pool);
+
+    let user = Address::generate(&env);
+    let deposit_amount = 10_000_000_i128;
+    mint_and_deposit(&env, &client, &usdc_token, &user, deposit_amount);
+
+    client.rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
+
+    assert_eq!(client.get_current_protocol(), symbol_short!("blend"));
+    assert_eq!(token_client.balance(&contract_id), 0_i128);
+    assert_eq!(token_client.balance(&blend_pool), deposit_amount);
+    assert_eq!(blend_client.supplied(&usdc_token), deposit_amount);
+
+    let events_before = env.events().all().len();
+
+    client.rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
+
+    let events_after = find_events_by_topic(env.events().all(), &env, symbol_short!("rebalance"));
+    assert_eq!(
+        events_after.len(),
+        2,
+        "the initial deployment and the noop rebalance should each emit one rebalance event"
+    );
+
+    let (_, _, data) = events_after.last().expect("expected a rebalance event");
+    let event = RebalanceEvent::try_from_val(&env, data).expect("Should be a RebalanceEvent");
+
+    assert_eq!(event.protocol, symbol_short!("blend"));
+    assert_eq!(event.expected_apy, 500_i128);
+    assert_eq!(event.status, symbol_short!("noop"));
+    assert_eq!(event.amount_attempted, 0_i128);
+    assert_eq!(event.amount_moved, 0_i128);
+    assert_eq!(event.amount_supplied, 0_i128);
+    assert_eq!(event.amount_withdrawn, 0_i128);
+
+    assert_eq!(client.get_current_protocol(), symbol_short!("blend"));
+    assert_eq!(token_client.balance(&contract_id), 0_i128);
+    assert_eq!(token_client.balance(&blend_pool), deposit_amount);
+    assert_eq!(blend_client.supplied(&usdc_token), deposit_amount);
+    assert_eq!(env.events().all().len(), events_before + 1);
+}
+
+#[test]
 fn test_owner_can_configure_blend_approval_ttl() {
     let env = Env::default();
     env.mock_all_auths();
@@ -40,6 +93,19 @@ fn test_owner_can_configure_blend_approval_ttl() {
     client.set_blend_approval_ttl(&owner, &42_u32);
 
     assert_eq!(client.get_blend_approval_ttl(), 42_u32);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #34)")]
+fn test_non_owner_cannot_configure_blend_approval_ttl() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let attacker = Address::generate(&env);
+
+    client.set_blend_approval_ttl(&attacker, &42_u32);
 }
 
 #[test]
@@ -250,6 +316,18 @@ fn test_rebalance_apy_parameter_accepted() {
     client.rebalance(&symbol_short!("none"), &0_i128, &0_i128);
     client.rebalance(&symbol_short!("none"), &850_i128, &0_i128);
     client.rebalance(&symbol_short!("none"), &2000_i128, &0_i128);
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #47)")]
+fn test_rebalance_rejects_expected_apy_above_range_with_typed_error() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.rebalance(&symbol_short!("none"), &10_001_i128, &0_i128);
 }
 
 #[test]
@@ -741,6 +819,34 @@ fn test_rebalance_exit_failure_leaves_protocol_unchanged() {
     let blend_client = MockBlendPoolClient::new(&env, &blend_pool);
 
     client.set_blend_pool(&owner, &blend_pool);
+// ─── Issue #383: pool-address rotation while funds are deployed ─────────────
+//
+// Companion to the `set_blend_pool`/`set_dex_pool` fund-stranding issue.
+// Neither setter currently guards against rotating the configured pool
+// address while a nonzero position is still deployed to the *old* pool:
+// every internal lookup (`get_protocol_balance`, `withdraw_from_blend`,
+// `withdraw_from_dex`) reads the pool address from storage *at call time*,
+// so once the address is rotated the vault permanently loses any way to see
+// or reach funds sitting in the old pool contract.
+//
+// Pre-fix, these tests document the stranding: the rotation succeeds
+// silently, and a subsequent `rebalance("none")` "succeeds" without
+// recovering any funds because the vault only ever queries the new (empty)
+// pool. Once a guard lands that rejects rotation while a position is
+// deployed, flip these assertions to expect the rotation call itself to
+// panic instead.
+
+#[test]
+fn test_blend_pool_rotation_while_deployed_strands_funds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, usdc_token, old_pool) = setup_vault_with_token_and_blend(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+    let old_pool_client = MockBlendPoolClient::new(&env, &old_pool);
+
+    client.set_blend_pool(&owner, &old_pool);
 
     let user = Address::generate(&env);
     let deposit_amount = 10_000_000_i128;
@@ -778,5 +884,111 @@ fn test_rebalance_exit_failure_leaves_protocol_unchanged() {
         idle + deployed,
         deposit_amount,
         "Total assets must be conserved after failed exit"
+    // Deploy funds to the old pool.
+    client.rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
+    assert_eq!(old_pool_client.supplied(&usdc_token), deposit_amount);
+    assert_eq!(client.get_current_protocol(), symbol_short!("blend"));
+
+    // Rotate to a brand new pool while the position is still fully deployed
+    // to `old_pool`. No guard currently exists — this succeeds.
+    let new_pool = env.register_contract(None, MockBlendPool);
+    client.set_blend_pool(&owner, &new_pool);
+    assert_eq!(client.get_blend_pool(), Some(new_pool.clone()));
+
+    // The funds never moved — they are still sitting in `old_pool` — but the
+    // vault's only pointer to a Blend pool now targets `new_pool`.
+    assert_eq!(
+        old_pool_client.supplied(&usdc_token),
+        deposit_amount,
+        "deployed funds remain in the old pool, untouched by the rotation"
+    );
+    let new_pool_client = MockBlendPoolClient::new(&env, &new_pool);
+    assert_eq!(new_pool_client.supplied(&usdc_token), 0);
+
+    // Attempting to exit the position now silently "succeeds" without
+    // recovering anything: withdraw_from_protocol queries `new_pool` (via
+    // DataKey::BlendPool), sees a 0 balance, treats the exit as complete, and
+    // flips CurrentProtocol to "none" — even though the real funds are stuck
+    // in `old_pool`.
+    client.rebalance(&symbol_short!("none"), &0_i128, &0_i128);
+
+    assert_eq!(
+        client.get_current_protocol(),
+        symbol_short!("none"),
+        "vault believes it exited the position cleanly"
+    );
+    assert_eq!(
+        token_client.balance(&contract_id),
+        0,
+        "no funds were actually recovered to the vault"
+    );
+    assert_eq!(
+        old_pool_client.supplied(&usdc_token),
+        deposit_amount,
+        "funds remain permanently stranded in the old pool"
+    );
+}
+
+#[test]
+fn test_dex_pool_rotation_while_deployed_strands_funds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, usdc_token, old_pool) = setup_vault_with_token_and_dex(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+    let old_pool_client = MockDexPoolClient::new(&env, &old_pool);
+
+    client.set_dex_pool(&owner, &old_pool);
+
+    let user = Address::generate(&env);
+    let deposit_amount = 10_000_000_i128;
+    mint_and_deposit(&env, &client, &usdc_token, &user, deposit_amount);
+
+    // Deploy funds to the old pool.
+    client.rebalance(&symbol_short!("dex"), &500_i128, &0_i128);
+    assert_eq!(
+        old_pool_client.balance(&usdc_token, &contract_id),
+        deposit_amount
+    );
+    assert_eq!(client.get_current_protocol(), symbol_short!("dex"));
+
+    // Rotate to a brand new pool while the position is still fully deployed
+    // to `old_pool`. No guard currently exists — this succeeds.
+    let new_pool = env.register_contract(None, MockDexPool);
+    client.set_dex_pool(&owner, &new_pool);
+    assert_eq!(client.get_dex_pool(), Some(new_pool.clone()));
+
+    // The funds never moved — they are still sitting in `old_pool` — but the
+    // vault's only pointer to a DEX pool now targets `new_pool`.
+    assert_eq!(
+        old_pool_client.balance(&usdc_token, &contract_id),
+        deposit_amount,
+        "deployed funds remain in the old pool, untouched by the rotation"
+    );
+    let new_pool_client = MockDexPoolClient::new(&env, &new_pool);
+    assert_eq!(new_pool_client.balance(&usdc_token, &contract_id), 0);
+
+    // Attempting to exit the position now silently "succeeds" without
+    // recovering anything: withdraw_from_protocol queries `new_pool` (via
+    // DataKey::DexPool), sees a 0 balance, treats the exit as complete, and
+    // flips CurrentProtocol to "none" — even though the real funds are stuck
+    // in `old_pool`.
+    client.rebalance(&symbol_short!("none"), &0_i128, &0_i128);
+
+    assert_eq!(
+        client.get_current_protocol(),
+        symbol_short!("none"),
+        "vault believes it exited the position cleanly"
+    );
+    assert_eq!(
+        token_client.balance(&contract_id),
+        0,
+        "no funds were actually recovered to the vault"
+    );
+    assert_eq!(
+        old_pool_client.balance(&usdc_token, &contract_id),
+        deposit_amount,
+        "funds remain permanently stranded in the old pool"
     );
 }

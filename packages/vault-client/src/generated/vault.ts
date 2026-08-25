@@ -54,181 +54,330 @@ export interface UserInfo {
 // Event payload types
 // ----------------------------------------------------------------
 
-/** Emitted when vault is initialized */
-export interface VaultInitializedEvent {
-  /** Contract owner */
-  owner: string;
-  /** AI agent address */
-  agent: string;
-  /** USDC token address */
-  usdc_token: string;
-  /** Initial TVL cap */
-  tvl_cap: bigint;
-}
-
-/** Emitted when user deposits USDC */
+/** Emitted by the contract. */
 export interface DepositEvent {
-  /** User address */
+  /** The user who made the deposit */
   user: string;
-  /** USDC amount deposited */
+  /** Amount of USDC deposited (7 decimal places) */
   amount: bigint;
-  /** Vault shares minted */
+  /** Number of vault shares minted for this deposit */
   shares: bigint;
 }
 
-/** Emitted when user withdraws USDC */
+/** Emitted by the contract. */
 export interface WithdrawEvent {
+  /** The user who made the withdrawal */
   user: string;
-  /** USDC amount withdrawn */
+  /** Amount of USDC withdrawn (7 decimal places) */
   amount: bigint;
-  /** Vault shares burned */
+  /** Number of vault shares burned for this withdrawal */
   shares: bigint;
 }
 
-/** Emitted when agent rebalances funds between protocols */
+/** Emitted by the contract. */
 export interface RebalanceEvent {
-  /** Target protocol */
+  /** The target protocol (supported: "blend", "none") */
   protocol: string;
-  /** Expected APY */
+  /** Expected APY in basis points (e.g., 850 = 8.5%) */
   expected_apy: bigint;
-  /** Minimum output */
-  min_out: bigint;
+  /** Status: "success", "failed", "partial", or "noop" (no funds moved) */
+  status: string;
+  /** Amount attempted to be moved */
+  amount_attempted: bigint;
+  /** Amount actually moved */
+  amount_moved: bigint;
+  /** Amount supplied into the target protocol */
+  amount_supplied: bigint;
+  /** Amount withdrawn from the current protocol */
+  amount_withdrawn: bigint;
 }
 
-/** Emitted when the current yield protocol is changed */
+/** Emitted by the contract. */
 export interface ProtocolChangedEvent {
-  /** New protocol symbol */
+  /** Protocol the vault was deployed to before the change (`"blend"`, `"dex"`, or `"none"`) */
+  old_protocol: string;
+  /** Protocol the vault is deployed to after the change (`"blend"`, `"dex"`, or `"none"`) */
   new_protocol: string;
 }
 
-/** Legacy pause event */
-export type PauseEvent = Record<string, never>;
-
-/** Emitted when vault operations are paused */
-export type VaultPausedEvent = Record<string, never>;
-
-/** Emitted when vault operations resume */
-export type VaultUnpausedEvent = Record<string, never>;
-
-/** Emitted when emergency pause is triggered */
-export type EmergencyPausedEvent = Record<string, never>;
-
-/** Emitted when TVL cap is updated */
-export interface TvlCapUpdatedEvent {
-  new_cap: bigint;
+/** Emitted by the contract. */
+export interface PauseEvent {
+  /** `true` if the vault is now paused, `false` if it is now unpaused */
+  paused: boolean;
+  /** Address that triggered the pause/unpause transition */
+  caller: string;
 }
 
-/** Emitted when user deposit cap is updated */
-export interface UserDepositCapUpdatedEvent {
-  new_cap: bigint;
-}
-
-/** Emitted when both caps are updated atomically */
-export interface CapsUpdatedEvent {
-  user_deposit_cap: bigint;
+/** Emitted by the contract. */
+export interface VaultInitializedEvent {
+  /** Initial owner address, authorized for every administrative entrypoint (pause, caps, pool configuration, upgrades, ownership transfer) */
+  owner: string;
+  /** Authorized AI agent address; the only address allowed to call `rebalance` and `update_total_assets` */
+  agent: string;
+  /** USDC token contract address; the only token the vault accepts */
+  usdc_token: string;
+  /** TVL cap applied at initialization, in USDC raw units (7 decimals) */
   tvl_cap: bigint;
 }
 
-/** Emitted when deposit limits are updated */
-export interface LimitsUpdatedEvent {
-  min_deposit: bigint;
-  max_deposit: bigint;
+/** Emitted by the contract. */
+export interface InitFailedEvent {
+  /** Address that attempted the initialization */
+  caller: string;
+  /** Short reason code describing why initialization was rejected */
+  reason: string;
 }
 
-/** Emitted when agent address is updated */
-export interface AgentUpdatedEvent {
-  new_agent: string;
-}
-
-/** Emitted when ownership transfer is initiated */
-export interface OwnershipTransferInitiatedEvent {
-  current_owner: string;
-  pending_owner: string;
-}
-
-/** Emitted when ownership transfer is completed */
-export interface OwnershipTransferredEvent {
-  previous_owner: string;
-  new_owner: string;
-}
-
-/** Emitted when pending ownership transfer is cancelled */
-export interface OwnershipTransferCancelledEvent {
+/** Emitted by the contract. */
+export interface VaultPausedEvent {
+  /** Owner address that triggered the pause (read from storage, not the caller argument) */
   owner: string;
-  cancelled_pending: string;
 }
 
-/** Emitted when total assets are updated to reflect yield or loss */
-export interface AssetsUpdatedEvent {
-  old_total: bigint;
-  new_total: bigint;
+/** Emitted by the contract. */
+export interface VaultUnpausedEvent {
+  /** Owner address that triggered the unpause (read from storage, not the caller argument) */
+  owner: string;
 }
 
-/** Emitted when contract is upgraded to new WASM */
-export interface UpgradedEvent {
-  old_version: number;
-  new_version: number;
+/** Emitted by the contract. */
+export interface EmergencyPausedEvent {
+  /** Owner address that triggered the emergency pause (read from storage, not the caller argument) */
+  owner: string;
 }
 
-/** Emitted when per-transaction deposit limits are updated */
-export interface DepositLimitsUpdatedEvent {
+/** Emitted by the contract. */
+export interface TvlCapUpdatedEvent {
+  /** TVL cap before the change, in USDC raw units (7 decimals) */
+  old_cap: bigint;
+  /** TVL cap after the change, in USDC raw units (7 decimals) */
+  new_cap: bigint;
+}
+
+/** Emitted by the contract. */
+export interface UserDepositCapUpdatedEvent {
+  /** Per-user deposit cap before the change, in USDC raw units (7 decimals) */
+  old_cap: bigint;
+  /** Per-user deposit cap after the change, in USDC raw units (7 decimals) */
+  new_cap: bigint;
+}
+
+/** Emitted by the contract. */
+export interface CapsUpdatedEvent {
+  /** Per-user deposit cap before the change, in USDC raw units (7 decimals) */
+  old_user_cap: bigint;
+  /** Per-user deposit cap after the change, in USDC raw units (7 decimals) */
+  new_user_cap: bigint;
+  /** TVL cap before the change, in USDC raw units (7 decimals) */
+  old_tvl_cap: bigint;
+  /** TVL cap after the change, in USDC raw units (7 decimals) */
+  new_tvl_cap: bigint;
+}
+
+/** Emitted by the contract. */
+export interface LimitsUpdatedEvent {
+  /** Minimum per-transaction deposit before the change, in USDC raw units (7 decimals) */
   old_min: bigint;
+  /** Minimum per-transaction deposit after the change, in USDC raw units (7 decimals) */
   new_min: bigint;
+  /** Maximum per-transaction deposit before the change, in USDC raw units (7 decimals) */
   old_max: bigint;
+  /** Maximum per-transaction deposit after the change, in USDC raw units (7 decimals) */
   new_max: bigint;
 }
 
-/** Emitted when the Blend pool address is configured */
-export interface BlendPoolConfiguredEvent {
-  old_pool: string | null;
-  new_pool: string;
+/** Emitted by the contract. */
+export interface DepositLimitsUpdatedEvent {
+  /** Minimum per-transaction deposit before the change, in USDC raw units (7 decimals) */
+  old_min: bigint;
+  /** Minimum per-transaction deposit after the change, in USDC raw units (7 decimals) */
+  new_min: bigint;
+  /** Maximum per-transaction deposit before the change, in USDC raw units (7 decimals) */
+  old_max: bigint;
+  /** Maximum per-transaction deposit after the change, in USDC raw units (7 decimals) */
+  new_max: bigint;
+}
+
+/** Emitted by the contract. */
+export interface RebalanceCooldownUpdatedEvent {
+  /** Minimum ledgers between rebalances before the change, or `0` if disabled */
+  old_interval: number;
+  /** Minimum ledgers between rebalances after the change, or `0` if disabled */
+  new_interval: number;
+}
+
+/** Emitted by the contract. */
+export interface ApprovalTtlUpdatedEvent {
+  /** Approval TTL in ledgers before the change */
+  old_ttl: number;
+  /** Approval TTL in ledgers after the change */
+  new_ttl: number;
+}
+
+/** Emitted by the contract. */
+export interface AgentUpdatedEvent {
+  /** Agent address that was authorized before the change */
+  old_agent: string;
+  /** Agent address authorized after the change */
+  new_agent: string;
+}
+
+/** Emitted by the contract. */
+export interface AgentUpdateProposedEvent {
+  /** Agent address currently authorized; remains active for the whole timelock window */
+  old_agent: string;
+  /** Proposed agent address, activated only by `confirm_agent_update` */
+  new_agent: string;
+  /** Ledger at which `confirm_agent_update()` becomes callable. */
+  effective_ledger: number;
+}
+
+/** Emitted by the contract. */
+export interface AgentUpdateConfirmedEvent {
+  /** Agent address that was authorized before confirmation */
+  old_agent: string;
+  /** Agent address now authorized to call `rebalance` and `update_total_assets` */
+  new_agent: string;
+}
+
+/** Emitted by the contract. */
+export interface AgentUpdateCancelledEvent {
+  /** Agent address that stays authorized; cancelling never changes the active agent */
+  old_agent: string;
+  /** Agent address that had been proposed and is now discarded */
+  proposed_new_agent: string;
+}
+
+/** Emitted by the contract. */
+export interface OwnershipTransferInitiatedEvent {
+  /** Owner address that remains in control until the transfer is accepted */
+  current_owner: string;
+  /** Proposed owner address that must call `accept_ownership` to take over */
+  pending_owner: string;
+}
+
+/** Emitted by the contract. */
+export interface OwnershipTransferredEvent {
+  /** Owner address that held control before the transfer */
+  old_owner: string;
+  /** Owner address now authorized for administrative entrypoints */
+  new_owner: string;
+}
+
+/** Emitted by the contract. */
+export interface OwnershipTransferCancelledEvent {
+  /** Owner address that stays in control; cancelling never changes the owner */
   owner: string;
+  /** Pending owner address that was discarded */
+  cancelled_pending: string;
 }
 
-/** Emitted when the DEX pool address is configured */
-export interface DexPoolConfiguredEvent {
-  old_pool: string | null;
-  new_pool: string;
-  owner: string;
+/** Emitted by the contract. */
+export interface AssetsUpdatedEvent {
+  /** Total managed assets before the update, in USDC raw units (7 decimals) */
+  old_total: bigint;
+  /** Total managed assets after the update, in USDC raw units (7 decimals) */
+  new_total: bigint;
 }
 
-/** Emitted when funds are supplied to a DEX liquidity pool */
-export interface DexSupplyEvent {
-  asset: string;
-  amount_actual: bigint;
-  success: boolean;
+/** Emitted by the contract. */
+export interface UpgradedEvent {
+  /** The contract version before the upgrade */
+  old_version: number;
+  /** The contract version after the upgrade */
+  new_version: number;
 }
 
-/** Emitted when funds are withdrawn from a DEX liquidity pool */
-export interface DexWithdrawEvent {
-  asset: string;
-  amount_actual: bigint;
-  success: boolean;
+/** Emitted by the contract. */
+export interface UpgradeScheduledEvent {
+  /** Hash of the WASM binary that will be activated once the timelock elapses. */
+  new_wasm_hash: Uint8Array;
+  /** Ledger at which `execute_upgrade()` becomes callable. */
+  effective_ledger: number;
 }
 
-/** Emitted when funds are supplied to Blend protocol */
+/** Emitted by the contract. */
+export interface UpgradeCancelledEvent {
+  /** Hash of the WASM binary whose pending upgrade was cancelled. */
+  cancelled_wasm_hash: Uint8Array;
+}
+
+/** Emitted by the contract. */
 export interface BlendSupplyEvent {
-  /** Amount supplied to Blend */
-  amount: bigint;
-  /** bUSDC tokens received */
-  b_tokens_received: bigint;
+  /** The asset address (USDC) */
+  asset: string;
+  /** Actual amount transferred to Blend (may be less than requested due to pool limits) */
+  amount_actual: bigint;
+  /** Whether the supply was successful */
+  success: boolean;
 }
 
-/** Emitted when funds are withdrawn from Blend protocol */
+/** Emitted by the contract. */
 export interface BlendWithdrawEvent {
-  /** bUSDC tokens burned */
-  b_tokens: bigint;
-  /** USDC amount received */
-  amount_received: bigint;
+  /** The asset address (USDC) */
+  asset: string;
+  /** Actual amount received from Blend (may be less than requested due to pool liquidity) */
+  amount_actual: bigint;
+  /** Whether the withdrawal succeeded */
+  success: boolean;
 }
 
-/** Emitted when initialization fails */
-export type InitFailedEvent = Record<string, never>;
+/** Emitted by the contract. */
+export interface BlendPoolConfiguredEvent {
+  /** Previous Blend pool address, or None if it was not configured */
+  old_pool: string | null;
+  /** Newly configured Blend pool address */
+  new_pool: string;
+  /** Owner who triggered the configuration change */
+  owner: string;
+}
 
-/** Emitted when rebalance operation fails */
+/** Emitted by the contract. */
+export interface DexSupplyEvent {
+  /** The asset address (USDC) */
+  asset: string;
+  /** Actual amount transferred to the DEX pool (may be less than requested due to slippage/limits) */
+  amount_actual: bigint;
+  /** Whether the supply was successful */
+  success: boolean;
+}
+
+/** Emitted by the contract. */
+export interface DexWithdrawEvent {
+  /** The asset address (USDC) */
+  asset: string;
+  /** Actual amount received from the DEX pool (may be less than requested due to liquidity) */
+  amount_actual: bigint;
+  /** Whether the withdrawal succeeded */
+  success: boolean;
+}
+
+/** Emitted by the contract. */
+export interface DexPoolConfiguredEvent {
+  /** Previous DEX pool address, or None if it was not configured */
+  old_pool: string | null;
+  /** Newly configured DEX pool address */
+  new_pool: string;
+  /** Owner who triggered the configuration change */
+  owner: string;
+}
+
+/** Emitted by the contract. */
 export interface RebalanceFailedEvent {
-  /** Failure reason */
+  /** The protocol the vault was trying to exit */
+  from_protocol: string;
+  /** Short reason code ("exit_fail" = incomplete withdrawal) */
   reason: string;
+}
+
+/** Emitted by the contract. */
+export interface UserStrategyUpdatedEvent {
+  /** The user who updated their strategy */
+  user: string;
+  /** Previous strategy symbol ("conservative", "balanced", "growth", or "") */
+  old_strategy: string;
+  /** New strategy symbol */
+  new_strategy: string;
 }
 
 // ----------------------------------------------------------------
@@ -237,12 +386,138 @@ export interface RebalanceFailedEvent {
 
 /** Numeric error codes returned by the NeuroWealth Vault contract. */
 export const VaultErrorCode = {
-  /** Supplied min limit is negative */
+  /** Supplied min limit is negative. */
   NegativeMin: 1,
-  /** Supplied max limit is negative */
+  /** Supplied max limit is negative. */
   NegativeMax: 2,
-  /** Max must be greater than or equal to min */
+  /** max must be greater than or equal to min. */
   MaxLessThanMin: 3,
+  /** Vault has already been initialized. */
+  AlreadyInitialized: 4,
+  /** Initializer is not the expected deployer. */
+  UnauthorizedDeployer: 5,
+  /** Minted shares must be positive. */
+  SharesToMintMustBePositive: 6,
+  /** Vault has no liquidity for the requested withdrawal. */
+  InsufficientLiquidity: 7,
+  /** User has insufficient shares. */
+  InsufficientShares: 8,
+  /** Vault has no assets to withdraw. */
+  NoAssetsToWithdraw: 9,
+  /** Burned shares must be positive. */
+  SharesToBurnMustBePositive: 10,
+  /** User has insufficient shares for the requested amount. */
+  InsufficientSharesForAmount: 11,
+  /** User has no shares to withdraw. */
+  NoSharesToWithdraw: 12,
+  /** Vault has no liquidity available. */
+  NoLiquidityAvailable: 13,
+  /** Vault has no assets to return. */
+  NoAssetsToReturn: 14,
+  /** Vault has no shares to burn. */
+  NoSharesToBurn: 15,
+  /** min_out must be non-negative. */
+  MinOutMustBeNonNegative: 16,
+  /** Protocol is not supported. */
+  UnsupportedProtocol: 17,
+  /** Blend pool is not configured. */
+  BlendPoolNotConfigured: 18,
+  /** Caller is not allowed to pause. */
+  OnlyOwnerCanPause: 19,
+  /** Caller is not allowed to unpause. */
+  OnlyOwnerCanUnpause: 20,
+  /** Vault is not paused. */
+  NotPaused: 21,
+  /** Caller is not allowed to emergency pause. */
+  OnlyOwnerCanEmergencyPause: 22,
+  /** TVL cap cannot be negative. */
+  TvlCapCannotBeNegative: 23,
+  /** User deposit cap cannot be negative. */
+  UserDepositCapCannotBeNegative: 24,
+  /** TVL cap must be greater than or equal to user deposit cap. */
+  TvlCapBelowUserDepositCap: 25,
+  /** Minimum deposit is below the allowed floor. */
+  MinimumDepositTooLow: 26,
+  /** Maximum deposit is below the minimum. */
+  MaximumDepositBelowMinimum: 27,
+  /** Caller is not allowed to configure a protocol pool. */
+  OnlyOwnerCanConfigurePool: 28,
+  /** Caller is not the pending owner (or no pending ownership transfer exists). */
+  CallerIsNotPendingOwner: 29,
+  /** Caller is not allowed to update total assets. */
+  OnlyAgentCanUpdateTotalAssets: 30,
+  /** Total assets decrease requires explicit allowance. */
+  TotalAssetsDecreaseNotAllowed: 31,
+  /** Total assets decrease exceeds configured maximum bps. */
+  DecreaseExceedsMaximumAllowedBps: 32,
+  /** Vault balance is insufficient for reported assets. */
+  InsufficientBalanceForAssets: 33,
+  /** Caller is not the owner. */
+  CallerIsNotOwner: 34,
+  /** Vault is paused. */
+  Paused: 35,
+  /** Vault is not initialized. */
+  NotInitialized: 36,
+  /** Amount must be positive. */
+  AmountMustBePositive: 37,
+  /** Deposit is below the configured minimum. */
+  BelowMinimumDeposit: 38,
+  /** Deposit exceeds the configured maximum. */
+  MaximumDepositExceeded: 39,
+  /** Deposit exceeds user cap. */
+  ExceedsUserDepositCap: 40,
+  /** Deposit exceeds TVL cap. */
+  ExceedsTvlCap: 41,
+  /** A protocol leg returned less than min_out. */
+  MinOutNotMet: 42,
+  /** Rebalance called before the configured cooldown has elapsed. */
+  RebalanceCooldownActive: 43,
+  /** Approval TTL is below the allowed floor. */
+  ApprovalTtlTooLow: 44,
+  /** Approval TTL is above the allowed ceiling. */
+  ApprovalTtlTooHigh: 45,
+  /** DEX liquidity pool is not configured. */
+  DexPoolNotConfigured: 46,
+  /** Strategy must be one of "conservative", "balanced", or "growth". */
+  InvalidStrategy: 47,
+  /** A timelocked proposal (agent update or upgrade) is already pending.  Shared by the agent timelock (#317) and the upgrade timelock (#316). The SDK caps `#[contracterror]` enums at 50 cases, so both two-step flows reuse one set of generic timelock error codes rather than each defining their own. */
+  TimelockAlreadyPending: 48,
+  /** No timelocked proposal exists to confirm/execute or cancel. */
+  NoTimelockPending: 49,
+  /** The timelock delay has not yet elapsed. */
+  TimelockNotExpired: 50,
+  /** Share conversion intermediate product overflow (assets * total_shares). */
+  ShareConversionOverflow: 51,
+  /** Total deposits arithmetic overflow. */
+  TotalDepositsOverflow: 52,
+  /** User shares arithmetic overflow. */
+  SharesOverflow: 53,
+  /** Total shares arithmetic overflow. */
+  TotalSharesOverflow: 54,
+  /** Total assets arithmetic overflow. */
+  TotalAssetsOverflow: 55,
+  /** Share conversion intermediate product overflow (shares * total_assets). */
+  ShareToAssetConversionOverflow: 56,
+  /** Exchange rate intermediate product overflow (total_assets * scalar). */
+  ExchangeRateOverflow: 57,
+  /** Arithmetic underflow in withdrawal. */
+  WithdrawalUnderflow: 58,
+  /** Maximum decrease calculation overflow. */
+  MaxDecreaseOverflow: 59,
+  /** Total available balance overflow. */
+  TotalAvailableOverflow: 60,
+  /** Version counter overflow. */
+  VersionOverflow: 61,
+  /** Deployer address supplied to `initialize` is the zero address. */
+  DeployerCannotBeZeroAddress: 62,
+  /** Owner address supplied to `initialize` is the zero address. */
+  OwnerCannotBeZeroAddress: 63,
+  /** Agent address supplied to `initialize` is the zero address. */
+  AgentCannotBeZeroAddress: 64,
+  /** USDC token address supplied to `initialize` is the zero address. */
+  UsdcTokenCannotBeZeroAddress: 65,
+  /** Maximum per-transaction deposit exceeds the absolute configured ceiling. */
+  MaximumDepositExceedsCeiling: 66,
   /** General validation error */
   ValidationError: 100,
   /** Vault is paused, deposits and withdrawals disabled */
@@ -264,6 +539,38 @@ export const VaultErrorCode = {
 } as const;
 
 export type VaultErrorCode = typeof VaultErrorCode[keyof typeof VaultErrorCode];
+
+
+/**
+ * Typed error wrapping contract-level VaultError responses.
+ *
+ * Provides a `.code` property with the numeric error code and
+ * preserves the original message.
+ */
+export class VaultError extends Error {
+  readonly code: VaultErrorCode;
+
+  constructor(code: VaultErrorCode, message: string) {
+    super(message);
+    this.name = "VaultError";
+    this.code = code;
+  }
+
+  /**
+   * Build a VaultError from a raw contract error object.
+   * Handles both `{code, message}` shapes and raw string errors.
+   */
+  static fromContractError(error: unknown): VaultError {
+    if (error && typeof error === "object" && "code" in error) {
+      const obj = error as { code: number; message?: string };
+      return new VaultError(obj.code as VaultErrorCode, obj.message ?? String(obj.code));
+    }
+    if (typeof error === "string") {
+      return new VaultError(0 as VaultErrorCode, error);
+    }
+    return new VaultError(0 as VaultErrorCode, String(error));
+  }
+}
 
 // ----------------------------------------------------------------
 // VaultClient
@@ -334,6 +641,18 @@ export class VaultClient {
   // Internal helpers
   // ------------------------------------------------------------------
 
+  private throwVaultError(method: string, error: unknown): never {
+    if (error instanceof VaultError) {
+      throw error;
+    }
+
+    const vaultError = VaultError.fromContractError(error);
+    if (vaultError.message === `Vault contract error ${vaultError.code}`) {
+      vaultError.message = `Vault contract error for ${method}`;
+    }
+    throw vaultError;
+  }
+
   /**
    * Build a contract invocation operation.
    * @internal
@@ -369,7 +688,7 @@ export class VaultClient {
 
     const sim = await this.server.simulateTransaction(tx);
     if (StellarSdk.SorobanRpc.Api.isSimulationError(sim)) {
-      throw new Error(`Simulation failed for ${method}: ${sim.error}`);
+      this.throwVaultError(method, sim.error ?? sim);
     }
     const resultEntry = (sim as StellarSdk.SorobanRpc.Api.SimulateTransactionSuccessResponse).result;
     if (!resultEntry) return undefined as unknown as T;
@@ -396,7 +715,7 @@ export class VaultClient {
 
     const sim = await this.server.simulateTransaction(tx);
     if (StellarSdk.SorobanRpc.Api.isSimulationError(sim)) {
-      throw new Error(`Simulation failed for ${method}: ${sim.error}`);
+      this.throwVaultError(method, sim.error ?? sim);
     }
 
     const prepared = StellarSdk.SorobanRpc.assembleTransaction(tx, sim).build();
@@ -404,7 +723,7 @@ export class VaultClient {
 
     const sendResp = await this.server.sendTransaction(prepared);
     if (sendResp.status === 'ERROR') {
-      throw new Error(`Submit failed for ${method}: ${JSON.stringify(sendResp.errorResult)}`);
+      this.throwVaultError(method, sendResp.errorResult ?? sendResp);
     }
 
     // Poll until confirmed
@@ -416,7 +735,7 @@ export class VaultClient {
       getResp = await this.server.getTransaction(sendResp.hash);
     }
     if (getResp.status === StellarSdk.SorobanRpc.Api.GetTransactionStatus.FAILED) {
-      throw new Error(`Transaction failed for ${method}: ${JSON.stringify(getResp)}`);
+      this.throwVaultError(method, getResp);
     }
 
     const retval = (getResp as StellarSdk.SorobanRpc.Api.GetSuccessfulTransactionResponse).returnValue;
@@ -433,11 +752,11 @@ export class VaultClient {
 
   /**
    * Initialize the vault contract (can only be called once)
-   * @param deployer  Deployer keypair address for signature verification
-   * @param owner  Contract owner address
-   * @param agent  Authorized AI agent address
-   * @param usdc_token  USDC token contract address
-   * @param salt  32-byte salt for deployment verification
+   * @param deployer
+   * @param owner
+   * @param agent
+   * @param usdc_token
+   * @param salt
    * @fires VaultInitializedEvent
    */
   async initialize(signer: StellarSdk.Keypair, deployer: string, owner: string, agent: string, usdc_token: string, salt: Uint8Array): Promise<TxResult<void>> {
@@ -447,8 +766,8 @@ export class VaultClient {
 
   /**
    * Deposit USDC into the vault and receive vault shares
-   * @param user  User depositing USDC
-   * @param amount  Amount of USDC to deposit (in base units, 7 decimals)
+   * @param user
+   * @param amount
    * @remarks
    * **Constraints:**
    * - amount must be > 0
@@ -467,9 +786,8 @@ export class VaultClient {
 
   /**
    * Withdraw USDC from the vault by burning shares
-   * @param user  User withdrawing USDC
-   * @param amount  Amount of USDC to withdraw (in base units)
-   * @returns Amount of USDC returned to user
+   * @param user
+   * @param amount
    * @remarks
    * **Constraints:**
    * - user must have sufficient shares to cover withdrawal
@@ -477,15 +795,14 @@ export class VaultClient {
    * - vault must not be paused
    * @fires WithdrawEvent
    */
-  async withdraw(signer: StellarSdk.Keypair, user: string, amount: bigint): Promise<TxResult<bigint>> {
+  async withdraw(signer: StellarSdk.Keypair, user: string, amount: bigint): Promise<TxResult<void>> {
     const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(user).toScVal(), nativeToScVal(amount, { type: 'i128' })];
-    return this.invoke<bigint>('withdraw', args, signer);
+    return this.invoke<void>('withdraw', args, signer);
   }
 
   /**
    * Withdraw all user funds by burning all shares
-   * @param user  User withdrawing all funds
-   * @returns Total amount of USDC withdrawn
+   * @param user
    * @fires WithdrawEvent
    */
   async withdraw_all(signer: StellarSdk.Keypair, user: string): Promise<TxResult<bigint>> {
@@ -495,9 +812,9 @@ export class VaultClient {
 
   /**
    * AI agent rebalances funds between yield protocols
-   * @param protocol  Target protocol: "blend" (Blend lending) or "none" (no deployment)
-   * @param expected_apy  Expected APY from target protocol (in basis points * 10^7)
-   * @param min_out  Minimum output amount (slippage protection)
+   * @param protocol
+   * @param expected_apy
+   * @param min_out
    * @fires RebalanceEvent
    */
   async rebalance(signer: StellarSdk.Keypair, protocol: string, expected_apy: bigint, min_out: bigint): Promise<TxResult<void>> {
@@ -507,7 +824,7 @@ export class VaultClient {
 
   /**
    * Pause deposits and withdrawals (emergency function)
-   * @param owner  Contract owner
+   * @param owner
    * @fires VaultPausedEvent
    */
   async pause(signer: StellarSdk.Keypair, owner: string): Promise<TxResult<void>> {
@@ -517,7 +834,7 @@ export class VaultClient {
 
   /**
    * Resume normal operations
-   * @param owner  Contract owner
+   * @param owner
    * @fires VaultUnpausedEvent
    */
   async unpause(signer: StellarSdk.Keypair, owner: string): Promise<TxResult<void>> {
@@ -527,7 +844,7 @@ export class VaultClient {
 
   /**
    * Emergency pause without signature verification (for critical situations)
-   * @param owner  Contract owner
+   * @param owner
    * @fires EmergencyPausedEvent
    */
   async emergency_pause(signer: StellarSdk.Keypair, owner: string): Promise<TxResult<void>> {
@@ -537,7 +854,7 @@ export class VaultClient {
 
   /**
    * Set maximum total value locked in vault
-   * @param cap  New TVL cap in base units
+   * @param cap
    * @fires TvlCapUpdatedEvent
    */
   async set_tvl_cap(signer: StellarSdk.Keypair, cap: bigint): Promise<TxResult<void>> {
@@ -547,7 +864,7 @@ export class VaultClient {
 
   /**
    * Set maximum deposit per user
-   * @param cap  New per-user deposit cap in base units
+   * @param cap
    * @fires UserDepositCapUpdatedEvent
    */
   async set_user_deposit_cap(signer: StellarSdk.Keypair, cap: bigint): Promise<TxResult<void>> {
@@ -557,24 +874,13 @@ export class VaultClient {
 
   /**
    * Set both user deposit cap and TVL cap in single atomic transaction
-   * @param user_deposit_cap  New per-user deposit cap
-   * @param tvl_cap  New total TVL cap
+   * @param user_deposit_cap
+   * @param tvl_cap
    * @fires CapsUpdatedEvent
    */
   async set_caps(signer: StellarSdk.Keypair, user_deposit_cap: bigint, tvl_cap: bigint): Promise<TxResult<void>> {
     const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(user_deposit_cap, { type: 'i128' }), nativeToScVal(tvl_cap, { type: 'i128' })];
     return this.invoke<void>('set_caps', args, signer);
-  }
-
-  /**
-   * Set minimum and maximum per-transaction deposit limits
-   * @param min  Minimum deposit per transaction
-   * @param max  Maximum deposit per transaction
-   * @fires LimitsUpdatedEvent
-   */
-  async set_deposit_limits(signer: StellarSdk.Keypair, min: bigint, max: bigint): Promise<TxResult<void>> {
-    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(min, { type: 'i128' }), nativeToScVal(max, { type: 'i128' })];
-    return this.invoke<void>('set_deposit_limits', args, signer);
   }
 
   /**
@@ -589,8 +895,113 @@ export class VaultClient {
   }
 
   /**
+   * Set minimum and maximum per-transaction deposit limits
+   * @param min
+   * @param max
+   * @fires LimitsUpdatedEvent
+   */
+  async set_deposit_limits(signer: StellarSdk.Keypair, min: bigint, max: bigint): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(min, { type: 'i128' }), nativeToScVal(max, { type: 'i128' })];
+    return this.invoke<void>('set_deposit_limits', args, signer);
+  }
+
+  /**
+   * Set minimum ledgers between rebalance calls (0 = no cooldown)
+   * @param interval
+   */
+  async set_rebalance_cooldown(signer: StellarSdk.Keypair, interval: number): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(interval, { type: 'u32' })];
+    return this.invoke<void>('set_rebalance_cooldown', args, signer);
+  }
+
+  /**
+   * Get the minimum ledger interval between rebalances
+   */
+  async get_rebalance_cooldown(sourcePublicKey: string): Promise<number> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<number>('get_rebalance_cooldown', args, sourcePublicKey);
+  }
+
+  /**
+   * Get the ledger sequence of the last successful rebalance
+   */
+  async get_last_rebalance_ledger(sourcePublicKey: string): Promise<number> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<number>('get_last_rebalance_ledger', args, sourcePublicKey);
+  }
+
+  /**
+   * Set the ledger TTL for token approvals (alias for set_blend_approval_ttl)
+   * @param ttl
+   */
+  async set_approval_ttl(signer: StellarSdk.Keypair, ttl: number): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(ttl, { type: 'u32' })];
+    return this.invoke<void>('set_approval_ttl', args, signer);
+  }
+
+  /**
+   * Get the configured token approval TTL in ledgers
+   */
+  async get_approval_ttl(sourcePublicKey: string): Promise<number> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<number>('get_approval_ttl', args, sourcePublicKey);
+  }
+
+  /**
+   * Get current TVL cap
+   */
+  async get_tvl_cap(sourcePublicKey: string): Promise<bigint> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<bigint>('get_tvl_cap', args, sourcePublicKey);
+  }
+
+  /**
+   * Get current per-user deposit cap
+   */
+  async get_user_deposit_cap(sourcePublicKey: string): Promise<bigint> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<bigint>('get_user_deposit_cap', args, sourcePublicKey);
+  }
+
+  /**
+   * Get minimum deposit amount per transaction
+   */
+  async get_min_deposit(sourcePublicKey: string): Promise<bigint> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<bigint>('get_min_deposit', args, sourcePublicKey);
+  }
+
+  /**
+   * Get maximum deposit amount per transaction
+   */
+  async get_max_deposit(sourcePublicKey: string): Promise<bigint> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<bigint>('get_max_deposit', args, sourcePublicKey);
+  }
+
+  /**
+   * Set a user's strategy choice
+   * @param user
+   * @param strategy
+   * @fires UserStrategyUpdatedEvent
+   */
+  async set_user_strategy(signer: StellarSdk.Keypair, user: string, strategy: string): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(user).toScVal(), nativeToScVal(strategy, { type: 'symbol' })];
+    return this.invoke<void>('set_user_strategy', args, signer);
+  }
+
+  /**
+   * Get a user's strategy choice
+   * @param user
+   */
+  async get_user_strategy(user: string, sourcePublicKey: string): Promise<string> {
+    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(user).toScVal()];
+    return this.simulate<string>('get_user_strategy', args, sourcePublicKey);
+  }
+
+  /**
    * Update the authorized AI agent address
-   * @param new_agent  New agent address
+   * @param new_agent
    * @fires AgentUpdatedEvent
    */
   async update_agent(signer: StellarSdk.Keypair, new_agent: string): Promise<TxResult<void>> {
@@ -599,29 +1010,35 @@ export class VaultClient {
   }
 
   /**
-   * Initiate two-step ownership transfer (new owner must call accept_ownership)
-   * @param new_owner  Address of new owner
-   * @fires OwnershipTransferInitiatedEvent
+   * Confirm a proposed agent update after the timelock has elapsed
+   * @fires AgentUpdateConfirmedEvent, AgentUpdatedEvent
    */
-  async transfer_ownership(signer: StellarSdk.Keypair, new_owner: string): Promise<TxResult<void>> {
-    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(new_owner).toScVal()];
-    return this.invoke<void>('transfer_ownership', args, signer);
+  async confirm_agent_update(signer: StellarSdk.Keypair): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.invoke<void>('confirm_agent_update', args, signer);
   }
 
   /**
-   * Accept ownership transfer (must be called by pending owner)
-   * @param new_owner  Pending owner address
-   * @fires OwnershipTransferredEvent
+   * Cancel a pending proposed agent update
+   * @fires AgentUpdateCancelledEvent
    */
-  async accept_ownership(signer: StellarSdk.Keypair, new_owner: string): Promise<TxResult<void>> {
-    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(new_owner).toScVal()];
-    return this.invoke<void>('accept_ownership', args, signer);
+  async cancel_agent_update(signer: StellarSdk.Keypair): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.invoke<void>('cancel_agent_update', args, signer);
+  }
+
+  /**
+   * Get the pending proposed agent address and effective ledger
+   */
+  async get_pending_agent_update(sourcePublicKey: string): Promise<unknown | null> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<unknown | null>('get_pending_agent_update', args, sourcePublicKey);
   }
 
   /**
    * Set Blend pool address for yield deployment
    * @param owner
-   * @param pool_address  Blend pool contract address
+   * @param pool_address
    * @fires BlendPoolConfiguredEvent
    */
   async set_blend_pool(signer: StellarSdk.Keypair, owner: string, pool_address: string): Promise<TxResult<void>> {
@@ -632,7 +1049,7 @@ export class VaultClient {
   /**
    * Set DEX pool address for liquidity deployment
    * @param owner
-   * @param pool_address  DEX pool contract address
+   * @param pool_address
    * @fires DexPoolConfiguredEvent
    */
   async set_dex_pool(signer: StellarSdk.Keypair, owner: string, pool_address: string): Promise<TxResult<void>> {
@@ -643,7 +1060,7 @@ export class VaultClient {
   /**
    * Set the ledger TTL for Blend token approvals
    * @param owner
-   * @param blend_approval_ttl  TTL in ledgers for Blend allowance approvals
+   * @param blend_approval_ttl
    */
   async set_blend_approval_ttl(signer: StellarSdk.Keypair, owner: string, blend_approval_ttl: number): Promise<TxResult<void>> {
     const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(owner).toScVal(), nativeToScVal(blend_approval_ttl, { type: 'u32' })];
@@ -651,21 +1068,23 @@ export class VaultClient {
   }
 
   /**
-   * Set the ledger TTL for token approvals (alias for set_blend_approval_ttl)
-   * @param ttl  TTL in ledgers for token allowance approvals
+   * Initiate two-step ownership transfer (new owner must call accept_ownership)
+   * @param new_owner
+   * @fires OwnershipTransferInitiatedEvent
    */
-  async set_approval_ttl(signer: StellarSdk.Keypair, ttl: number): Promise<TxResult<void>> {
-    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(ttl, { type: 'u32' })];
-    return this.invoke<void>('set_approval_ttl', args, signer);
+  async transfer_ownership(signer: StellarSdk.Keypair, new_owner: string): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(new_owner).toScVal()];
+    return this.invoke<void>('transfer_ownership', args, signer);
   }
 
   /**
-   * Set minimum ledgers between rebalance calls (0 = no cooldown)
-   * @param interval  Minimum ledger interval between rebalances
+   * Accept ownership transfer (must be called by pending owner)
+   * @param new_owner
+   * @fires OwnershipTransferredEvent
    */
-  async set_rebalance_cooldown(signer: StellarSdk.Keypair, interval: number): Promise<TxResult<void>> {
-    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(interval, { type: 'u32' })];
-    return this.invoke<void>('set_rebalance_cooldown', args, signer);
+  async accept_ownership(signer: StellarSdk.Keypair, new_owner: string): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(new_owner).toScVal()];
+    return this.invoke<void>('accept_ownership', args, signer);
   }
 
   /**
@@ -678,11 +1097,19 @@ export class VaultClient {
   }
 
   /**
+   * Get pending owner address if transfer in progress
+   */
+  async get_pending_owner(sourcePublicKey: string): Promise<string | null> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<string | null>('get_pending_owner', args, sourcePublicKey);
+  }
+
+  /**
    * Update total assets to reflect realized yield or loss
-   * @param agent  AI agent address
-   * @param new_total  New total assets value
-   * @param allow_decrease  Allow total to decrease
-   * @param max_decrease_bps  Maximum decrease in basis points
+   * @param agent
+   * @param new_total
+   * @param allow_decrease
+   * @param max_decrease_bps
    * @fires AssetsUpdatedEvent
    */
   async update_total_assets(signer: StellarSdk.Keypair, agent: string, new_total: bigint, allow_decrease: boolean, max_decrease_bps: number): Promise<TxResult<void>> {
@@ -691,14 +1118,42 @@ export class VaultClient {
   }
 
   /**
-   * Upgrade contract code to new WASM
+   * Schedule a contract WASM code upgrade by hash, initiating the timelock window
    * @param owner
-   * @param new_wasm_hash  SHA256 hash of new WASM code
+   * @param new_wasm_hash
+   * @fires UpgradeScheduledEvent
+   */
+  async schedule_upgrade(signer: StellarSdk.Keypair, owner: string, new_wasm_hash: Uint8Array): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(owner).toScVal(), nativeToScVal(new_wasm_hash, { type: 'bytes' })];
+    return this.invoke<void>('schedule_upgrade', args, signer);
+  }
+
+  /**
+   * Execute a scheduled contract WASM code upgrade after the timelock has elapsed
+   * @param owner
    * @fires UpgradedEvent
    */
-  async upgrade(signer: StellarSdk.Keypair, owner: string, new_wasm_hash: Uint8Array): Promise<TxResult<void>> {
-    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(owner).toScVal(), nativeToScVal(new_wasm_hash, { type: 'bytes' })];
-    return this.invoke<void>('upgrade', args, signer);
+  async execute_upgrade(signer: StellarSdk.Keypair, owner: string): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(owner).toScVal()];
+    return this.invoke<void>('execute_upgrade', args, signer);
+  }
+
+  /**
+   * Cancel a pending contract code upgrade proposal
+   * @param owner
+   * @fires UpgradeCancelledEvent
+   */
+  async cancel_upgrade(signer: StellarSdk.Keypair, owner: string): Promise<TxResult<void>> {
+    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(owner).toScVal()];
+    return this.invoke<void>('cancel_upgrade', args, signer);
+  }
+
+  /**
+   * Get the pending proposed upgrade WASM hash and effective ledger
+   */
+  async get_pending_upgrade(sourcePublicKey: string): Promise<unknown | null> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<unknown | null>('get_pending_upgrade', args, sourcePublicKey);
   }
 
   /**
@@ -744,19 +1199,66 @@ export class VaultClient {
   }
 
   /**
-   * Get current exchange rate (assets per share * 10^7)
+   * Extend persistent TTL for user shares entry
+   * @param user
    */
-  async get_exchange_rate(sourcePublicKey: string): Promise<bigint> {
-    const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<bigint>('get_exchange_rate', args, sourcePublicKey);
+  async touch_user_ttl(user: string, sourcePublicKey: string): Promise<boolean> {
+    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(user).toScVal()];
+    return this.simulate<boolean>('touch_user_ttl', args, sourcePublicKey);
   }
 
   /**
-   * Get contract owner address
+   * Get complete user information and statistics
+   * @param user
    */
-  async get_owner(sourcePublicKey: string): Promise<string> {
-    const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<string>('get_owner', args, sourcePublicKey);
+  async get_user_info(user: string, sourcePublicKey: string): Promise<UserInfo> {
+    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(user).toScVal()];
+    return this.simulate<UserInfo>('get_user_info', args, sourcePublicKey);
+  }
+
+  /**
+   * Preview shares minted for asset amount (floor)
+   * @param assets
+   */
+  async preview_deposit_to_shares(assets: bigint, sourcePublicKey: string): Promise<bigint> {
+    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(assets, { type: 'i128' })];
+    return this.simulate<bigint>('preview_deposit_to_shares', args, sourcePublicKey);
+  }
+
+  /**
+   * Preview assets returned for share amount (floor)
+   * @param shares
+   */
+  async preview_shares_to_assets(shares: bigint, sourcePublicKey: string): Promise<bigint> {
+    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(shares, { type: 'i128' })];
+    return this.simulate<bigint>('preview_shares_to_assets', args, sourcePublicKey);
+  }
+
+  /**
+   * Preview shares burned for withdrawal amount (ceil)
+   * @param assets
+   */
+  async preview_withdraw(assets: bigint, sourcePublicKey: string): Promise<bigint> {
+    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(assets, { type: 'i128' })];
+    return this.simulate<bigint>('preview_withdraw', args, sourcePublicKey);
+  }
+
+  /**
+   * Convert asset amount to shares (floor)
+   * @param assets
+   */
+  async convert_to_shares(assets: bigint, sourcePublicKey: string): Promise<bigint> {
+    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(assets, { type: 'i128' })];
+    return this.simulate<bigint>('convert_to_shares', args, sourcePublicKey);
+  }
+
+  /**
+   * Convert share amount to assets (floor)
+   * @param shares
+   */
+  async convert_to_assets(shares: bigint, sourcePublicKey: string): Promise<bigint> {
+    const args: StellarSdk.xdr.ScVal[] = [nativeToScVal(shares, { type: 'i128' })];
+    return this.simulate<bigint>('convert_to_assets', args, sourcePublicKey);
   }
 
   /**
@@ -768,11 +1270,19 @@ export class VaultClient {
   }
 
   /**
-   * Get USDC token contract address
+   * Get contract owner address
    */
-  async get_usdc_token(sourcePublicKey: string): Promise<string> {
+  async get_owner(sourcePublicKey: string): Promise<string> {
     const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<string>('get_usdc_token', args, sourcePublicKey);
+    return this.simulate<string>('get_owner', args, sourcePublicKey);
+  }
+
+  /**
+   * Check if vault is paused
+   */
+  async is_paused(sourcePublicKey: string): Promise<boolean> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<boolean>('is_paused', args, sourcePublicKey);
   }
 
   /**
@@ -781,6 +1291,14 @@ export class VaultClient {
   async get_version(sourcePublicKey: string): Promise<number> {
     const args: StellarSdk.xdr.ScVal[] = [];
     return this.simulate<number>('get_version', args, sourcePublicKey);
+  }
+
+  /**
+   * Get USDC token contract address
+   */
+  async get_usdc_token(sourcePublicKey: string): Promise<string> {
+    const args: StellarSdk.xdr.ScVal[] = [];
+    return this.simulate<string>('get_usdc_token', args, sourcePublicKey);
   }
 
   /**
@@ -800,117 +1318,6 @@ export class VaultClient {
   }
 
   /**
-   * Get current TVL cap
-   */
-  async get_tvl_cap(sourcePublicKey: string): Promise<bigint> {
-    const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<bigint>('get_tvl_cap', args, sourcePublicKey);
-  }
-
-  /**
-   * Get current per-user deposit cap
-   */
-  async get_user_deposit_cap(sourcePublicKey: string): Promise<bigint> {
-    const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<bigint>('get_user_deposit_cap', args, sourcePublicKey);
-  }
-
-  /**
-   * Get minimum deposit amount per transaction
-   */
-  async get_min_deposit(sourcePublicKey: string): Promise<bigint> {
-    const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<bigint>('get_min_deposit', args, sourcePublicKey);
-  }
-
-  /**
-   * Get maximum deposit amount per transaction
-   */
-  async get_max_deposit(sourcePublicKey: string): Promise<bigint> {
-    const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<bigint>('get_max_deposit', args, sourcePublicKey);
-  }
-
-  /**
-   * Get pending owner address if transfer in progress
-   */
-  async get_pending_owner(sourcePublicKey: string): Promise<string | null> {
-    const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<string | null>('get_pending_owner', args, sourcePublicKey);
-  }
-
-  /**
-   * Get complete user information and statistics
-   * @param user
-   */
-  async get_user_info(user: string, sourcePublicKey: string): Promise<UserInfo> {
-    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(user).toScVal()];
-    return this.simulate<UserInfo>('get_user_info', args, sourcePublicKey);
-  }
-
-  /**
-   * Check if vault is paused
-   */
-  async is_paused(sourcePublicKey: string): Promise<boolean> {
-    const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<boolean>('is_paused', args, sourcePublicKey);
-  }
-
-  /**
-   * Extend persistent TTL for user shares entry
-   * @param user
-   */
-  async touch_user_ttl(user: string, sourcePublicKey: string): Promise<boolean> {
-    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(user).toScVal()];
-    return this.simulate<boolean>('touch_user_ttl', args, sourcePublicKey);
-  }
-
-  /**
-   * Preview shares minted for asset amount (floor)
-   * @param assets
-   */
-  async preview_deposit_to_shares(assets: string, sourcePublicKey: string): Promise<bigint> {
-    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(assets).toScVal()];
-    return this.simulate<bigint>('preview_deposit_to_shares', args, sourcePublicKey);
-  }
-
-  /**
-   * Preview assets returned for share amount (floor)
-   * @param shares
-   */
-  async preview_shares_to_assets(shares: string, sourcePublicKey: string): Promise<bigint> {
-    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(shares).toScVal()];
-    return this.simulate<bigint>('preview_shares_to_assets', args, sourcePublicKey);
-  }
-
-  /**
-   * Preview shares burned for withdrawal amount (ceil)
-   * @param assets
-   */
-  async preview_withdraw(assets: string, sourcePublicKey: string): Promise<bigint> {
-    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(assets).toScVal()];
-    return this.simulate<bigint>('preview_withdraw', args, sourcePublicKey);
-  }
-
-  /**
-   * Convert asset amount to shares (floor)
-   * @param assets
-   */
-  async convert_to_shares(assets: string, sourcePublicKey: string): Promise<bigint> {
-    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(assets).toScVal()];
-    return this.simulate<bigint>('convert_to_shares', args, sourcePublicKey);
-  }
-
-  /**
-   * Convert share amount to assets (floor)
-   * @param shares
-   */
-  async convert_to_assets(shares: string, sourcePublicKey: string): Promise<bigint> {
-    const args: StellarSdk.xdr.ScVal[] = [new StellarSdk.Address(shares).toScVal()];
-    return this.simulate<bigint>('convert_to_assets', args, sourcePublicKey);
-  }
-
-  /**
    * Get DEX pool address if configured
    */
   async get_dex_pool(sourcePublicKey: string): Promise<string | null> {
@@ -927,27 +1334,11 @@ export class VaultClient {
   }
 
   /**
-   * Get the configured token approval TTL in ledgers
+   * Get current exchange rate (assets per share * 10^7)
    */
-  async get_approval_ttl(sourcePublicKey: string): Promise<number> {
+  async get_exchange_rate(sourcePublicKey: string): Promise<bigint> {
     const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<number>('get_approval_ttl', args, sourcePublicKey);
-  }
-
-  /**
-   * Get the minimum ledger interval between rebalances
-   */
-  async get_rebalance_cooldown(sourcePublicKey: string): Promise<number> {
-    const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<number>('get_rebalance_cooldown', args, sourcePublicKey);
-  }
-
-  /**
-   * Get the ledger sequence of the last successful rebalance
-   */
-  async get_last_rebalance_ledger(sourcePublicKey: string): Promise<number> {
-    const args: StellarSdk.xdr.ScVal[] = [];
-    return this.simulate<number>('get_last_rebalance_ledger', args, sourcePublicKey);
+    return this.simulate<bigint>('get_exchange_rate', args, sourcePublicKey);
   }
 
   /**

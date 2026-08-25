@@ -4,9 +4,7 @@ use super::utils::*;
 use crate::{UserStrategyUpdatedEvent, TOPIC_USER_STRATEGY_UPDATED};
 use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, Symbol, TryFromVal};
 
-fn setup(
-    env: &Env,
-) -> (Address, NeuroWealthVaultClient<'_>, Address, Address) {
+fn setup(env: &Env) -> (Address, NeuroWealthVaultClient<'_>, Address, Address) {
     env.mock_all_auths();
     let (contract_id, agent, _owner, usdc_token) = setup_vault_with_token(env);
     let client = NeuroWealthVaultClient::new(env, &contract_id);
@@ -77,6 +75,46 @@ fn test_invalid_strategy_rejected() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #47)")]
+fn test_empty_strategy_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_contract_id, client, _agent, _usdc_token) = setup(&env);
+    let user = Address::generate(&env);
+    client.set_user_strategy(&user, &Symbol::new(&env, ""));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #47)")]
+fn test_uppercase_strategy_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_contract_id, client, _agent, _usdc_token) = setup(&env);
+    let user = Address::generate(&env);
+    client.set_user_strategy(&user, &Symbol::new(&env, "CONSERVATIVE"));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #47)")]
+fn test_mixed_case_strategy_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_contract_id, client, _agent, _usdc_token) = setup(&env);
+    let user = Address::generate(&env);
+    client.set_user_strategy(&user, &Symbol::new(&env, "Balanced"));
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #47)")]
+fn test_symbol_longer_than_nine_chars_rejected() {
+    let env = Env::default();
+    env.mock_all_auths();
+    let (_contract_id, client, _agent, _usdc_token) = setup(&env);
+    let user = Address::generate(&env);
+    client.set_user_strategy(&user, &Symbol::new(&env, "safeststrategy"));
+}
+
+#[test]
 #[should_panic(expected = "Error(Contract, #36)")]
 fn test_set_strategy_before_init_panics() {
     let env = Env::default();
@@ -137,12 +175,13 @@ fn test_set_strategy_emits_event() {
 
     client.set_user_strategy(&user, &Symbol::new(&env, "conservative"));
 
-    let strategy_events = find_events_by_topic(
-        env.events().all(),
-        &env,
-        TOPIC_USER_STRATEGY_UPDATED,
+    let strategy_events =
+        find_events_by_topic(env.events().all(), &env, TOPIC_USER_STRATEGY_UPDATED);
+    assert_eq!(
+        strategy_events.len(),
+        1,
+        "Exactly one usr_strat event should be emitted"
     );
-    assert_eq!(strategy_events.len(), 1, "Exactly one usr_strat event should be emitted");
 
     let (_, _, data) = &strategy_events[0];
     let event = UserStrategyUpdatedEvent::try_from_val(&env, data)

@@ -1,0 +1,40 @@
+{
+  "name": "@neurowealth/vault-ui",
+  "version": "1.0.0",
+  "description": "NeuroWealth Vault frontend components: DepositWithdrawModal and EarningsHistoryPage",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "lint": "eslint src --ext ts,tsx"
+  },
+  "dependencies": {
+    "@neurowealth/vault-client": "file:../vault-client",
+    "@stellar/stellar-sdk": "^12.0.0",
+    "date-fns": "^3.0.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "recharts": "^2.10.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.0.0",
+    "autoprefixer": "^10.4.0",
+    "eslint": "^8.0.0",
+    "eslint-plugin-react": "^7.12.4",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "^5.3.0",
+    "vite": "^5.0.0",
+    "vitest": "^1.0.0"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.0",
+    "react-dom": ">=17.0.0"
+  },
+  "license": "MIT"
+}

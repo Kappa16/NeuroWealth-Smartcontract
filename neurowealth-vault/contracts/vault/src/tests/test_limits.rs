@@ -1,7 +1,7 @@
 //! Tests for deposit limits and caps
 
 use super::utils::*;
-use crate::{DataKey, DEFAULT_MIN_DEPOSIT};
+use crate::{DataKey, DEFAULT_MIN_DEPOSIT, MAX_DEPOSIT_CEILING};
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 #[test]
@@ -131,6 +131,52 @@ fn test_set_deposit_limits_max_less_than_min() {
     let max = 4_000_000_i128; // Less than min
 
     client.set_deposit_limits(&min, &max);
+}
+
+// ============================================================================
+// ISSUE #435 — UPPER BOUND ON set_deposit_limits' max
+// ============================================================================
+
+/// `max` set exactly to the ceiling is accepted (inclusive boundary).
+#[test]
+fn test_set_deposit_limits_max_at_ceiling_succeeds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_deposit_limits(&DEFAULT_MIN_DEPOSIT, &MAX_DEPOSIT_CEILING);
+
+    assert_eq!(client.get_max_deposit(), MAX_DEPOSIT_CEILING);
+}
+
+/// One unit above the ceiling must be rejected, preventing a misconfigured
+/// astronomically-high per-transaction maximum (e.g. an accidental `i128::MAX`).
+#[test]
+#[should_panic(expected = "Error(Contract, #66)")]
+fn test_set_deposit_limits_max_above_ceiling_panics() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_deposit_limits(&DEFAULT_MIN_DEPOSIT, &(MAX_DEPOSIT_CEILING + 1));
+}
+
+/// An accidental `i128::MAX` (the historical footgun this issue guards
+/// against) must be rejected rather than silently disabling the per-tx cap.
+#[test]
+#[should_panic(expected = "Error(Contract, #66)")]
+fn test_set_deposit_limits_rejects_i128_max() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    client.set_deposit_limits(&DEFAULT_MIN_DEPOSIT, &i128::MAX);
 }
 
 #[test]
@@ -449,4 +495,79 @@ fn test_deposit_cap_blocks_when_yield_partially_fills_cap() {
     let over_limit = 2_000_000_i128;
     token_client.mint(&user, &over_limit);
     client.deposit(&user, &over_limit);
+}
+
+// ============================================================================
+// ISSUE #547 — LOWERING USER DEPOSIT CAP BLOCKS NEW DEPOSITS
+// ============================================================================
+
+/// Verifies that when the owner lowers the per-user deposit cap below a user's
+/// current deposit, the existing deposit is not affected, but new deposits from
+/// that user are blocked until withdrawals reduce their balance below the cap.
+#[test]
+fn test_lowering_user_deposit_cap_below_current_deposit_blocks_new_deposits() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+
+    // 1. Set user deposit cap to 1000 USDC (1,000,000,000 stroops / units)
+    let cap_1000 = 1_000_000_000_i128;
+    client.set_user_deposit_cap(&cap_1000);
+    assert_eq!(client.get_user_deposit_cap(), cap_1000);
+
+    // 2. User A deposits 800 USDC (succeeds)
+    let user_a = Address::generate(&env);
+    let deposit_800 = 800_000_000_i128;
+    token_client.mint(&user_a, &deposit_800);
+    client.deposit(&user_a, &deposit_800);
+    assert_eq!(client.get_balance(&user_a), deposit_800);
+
+    // 3. Owner lowers cap to 500 USDC (should succeed)
+    let cap_500 = 500_000_000_i128;
+    client.set_user_deposit_cap(&cap_500);
+    assert_eq!(client.get_user_deposit_cap(), cap_500);
+
+    // 4. User A tries to deposit another 100 USDC (should fail because 800 + 100 > 500)
+    let deposit_100 = 100_000_000_i128;
+    token_client.mint(&user_a, &deposit_100);
+    let result = client.try_deposit(&user_a, &deposit_100);
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(40))),
+        "New deposit exceeding lowered cap must be blocked with VaultError::ExceedsUserDepositCap (#40)"
+    );
+
+    // 5. Assert User A's existing 800 USDC remains untouched
+    assert_eq!(client.get_balance(&user_a), deposit_800);
+
+    // 6. User A withdraws 400 USDC (succeeds)
+    let withdraw_400 = 400_000_000_i128;
+    client.withdraw(&user_a, &withdraw_400);
+    assert_eq!(client.get_balance(&user_a), deposit_800 - withdraw_400);
+
+    // 7. User A deposits 100 USDC (succeeds since 400 + 100 <= 500)
+    client.deposit(&user_a, &deposit_100);
+    assert_eq!(
+        client.get_balance(&user_a),
+        deposit_800 - withdraw_400 + deposit_100
+    );
+
+    // 8. Multi-user isolation check: User B deposits 300 USDC (succeeds since 300 <= 500)
+    let user_b = Address::generate(&env);
+    let deposit_300 = 300_000_000_i128;
+    token_client.mint(&user_b, &deposit_300);
+    client.deposit(&user_b, &deposit_300);
+    assert_eq!(client.get_balance(&user_b), deposit_300);
+
+    // User B tries to deposit another 300 USDC (300 + 300 = 600 > 500 cap) -> Fails with ExceedsUserDepositCap
+    token_client.mint(&user_b, &deposit_300);
+    let result_b = client.try_deposit(&user_b, &deposit_300);
+    assert_eq!(
+        result_b,
+        Err(Ok(soroban_sdk::Error::from_contract_error(40))),
+        "User B deposit exceeding lowered cap must be blocked with VaultError::ExceedsUserDepositCap (#40)"
+    );
 }

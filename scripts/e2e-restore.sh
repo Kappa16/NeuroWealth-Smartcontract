@@ -59,7 +59,7 @@ echo ""
 # Remove CLI identities
 # ---------------------------------------------------------------------------
 
-IDENTITIES=("e2e-deployer" "e2e-user")
+IDENTITIES=("e2e-deployer" "e2e-user" "e2e-new-agent")
 
 for id in "${IDENTITIES[@]}"; do
   if [[ -n "$CLI" ]]; then

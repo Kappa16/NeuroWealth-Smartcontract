@@ -85,6 +85,11 @@ Where:
 | 40 | `ExceedsUserDepositCap` | `vault: exceeds user deposit cap` |
 | 41 | `ExceedsTvlCap` | `vault: exceeds TVL cap` |
 | 42 | `MinOutNotMet` | `vault: <leg> received <actual> below min_out <min_out>` |
+| 62 | `DeployerCannotBeZeroAddress` | `vault: deployer cannot be zero address` |
+| 63 | `OwnerCannotBeZeroAddress` | `vault: owner cannot be zero address` |
+| 64 | `AgentCannotBeZeroAddress` | `vault: agent cannot be zero address` |
+| 65 | `UsdcTokenCannotBeZeroAddress` | `vault: usdc token cannot be zero address` |
+| 66 | `MaximumDepositExceedsCeiling` | `vault: maximum deposit exceeds ceiling` |
 
 ## Error Categories
 
