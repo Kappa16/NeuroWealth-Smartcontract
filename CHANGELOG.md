@@ -12,6 +12,25 @@ This changelog is tied to the vault contract `Version` storage value. Each relea
 <!-- Add entries below. Format: `- Short description (Issue #N).` -->
 - Document `harvest()` in README, ARCHITECTURE, SECURITY, and the state machine; add dedicated idle/deployed asset breakdown tests (Issues #499, #498, #501).
 <!-- If this PR bumps get_version(), note the new Version value here. -->
+- **Pause-semantics matrix (Issue #601):** Added definitive per-function
+  blocked/allowed table to `SECURITY.md` covering all public contract
+  functions. Exhaustive tests in `test_pause.rs` encode the matrix as
+  machine-checked assertions so future functions cannot silently bypass pause
+  checks without failing the test suite. PR checklist updated to require
+  classification of every new function.
+- **Least-privilege agent evaluation (Issue #606):** Added design doc
+  `docs/LEAST_PRIVILEGE_AGENT.md` evaluating separation of the rebalancer and
+  reporter agent sub-roles with a recorded go/no-go decision and interim
+  operational mitigations.
+- **Guardian-key design (Issue #607):** Added design doc
+  `docs/GUARDIAN_KEY_DESIGN.md` comparing guardian pattern vs. owner multi-sig
+  vs. status quo for `execute_upgrade`, with a phased implementation plan and
+  migration/compatibility notes.
+- **Bug bounty program (Issue #608):** Published `docs/BUG_BOUNTY.md` with
+  in-scope contracts/paths, four-tier severity rubric with example bug classes,
+  safe-harbor terms, response SLAs, payout process, and reporting channel.
+  Linked from `README.md` and `SECURITY.md`.
+- No `Version` bump (pre-mainnet, documentation/test-only changes).
 - `initialize` now rejects the zero address (the unspendable all-zero ed25519
   account) for `deployer`, `owner`, `agent`, and `usdc_token`, with dedicated
   `VaultError` codes 62-65, so a vault can never be initialized with a
