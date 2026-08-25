@@ -260,6 +260,64 @@ For detailed incident response procedures, refer to:
 
 - [ ] **Testnet Drill Completed successfully:** Sign off on the drill.
 
+### 📝 Game-Day Drill: Alert-to-Pause RTO Measurement (Devnet)
+
+The pause drill above proves the mechanism works; this drill measures how fast
+the *organization* can use it. It exercises the full detection → response
+chain — monitoring alert fires, on-call is paged, `emergency_pause` lands
+on-chain — and records the elapsed time as the incident Recovery Time
+Objective (RTO) baseline for mainnet.
+
+**Cadence:** run once before mainnet launch, then quarterly. Rotate which
+operator is on-call so every keyholder has executed a pause under time
+pressure at least once.
+
+**Roles:**
+
+- **Drill conductor** — injects the signal, keeps the timestamp log, does not
+  assist the responder.
+- **On-call responder** — receives the page and executes the runbook exactly
+  as they would in a real incident (no pre-warming of CLI sessions or keys).
+
+**Procedure (all timestamps in UTC, captured by the conductor):**
+
+1. **T0 — Inject simulated exploit signal.** Without pre-announcing the exact
+   time, the conductor triggers one of the monitoring alerts from
+   [monitoring.md](monitoring.md) against the devnet deployment — e.g. submit
+   transactions that trip `withdrawal_spike`, or fire the alert rule directly
+   in the monitoring stack with a `[DRILL]` prefix.
+2. **T1 — Alert fired.** Timestamp when the monitoring system actually emits
+   the page/notification.
+3. **T2 — Responder acknowledged.** Timestamp when the on-call operator acks
+   the page.
+4. **T3 — `emergency_pause` submitted.** Responder runs, from the standard
+   runbook (no shortcuts):
+   ```bash
+   stellar contract invoke --id $DEVNET_VAULT_CONTRACT_ID --source owner --network testnet -- emergency_pause --owner $OWNER_ADDRESS
+   ```
+5. **T4 — Pause confirmed on-chain.** Timestamp of the ledger that includes
+   the transaction; verify `is_paused()` returns `true` and the
+   `EmergencyPausedEvent` was emitted.
+6. **Debrief.** Compute `RTO = T4 − T0`. Record every blocker encountered
+   (key retrieval friction, missing docs, RPC issues, alert routing delays)
+   and file an issue for each. Unpause the devnet vault and confirm normal
+   operation resumes.
+
+**RTO target (mainnet): `T4 − T0 ≤ 15 minutes`, with `T3 − T2 ≤ 5 minutes`.**
+A drill exceeding the target must be re-run after the identified blockers are
+fixed; do not sign off mainnet readiness on a failed drill.
+
+**Drill log** (append one row per drill; keep raw timestamp notes in the
+incident-response log):
+
+| Date (UTC) | Responder | T0 signal | T1 alert | T2 ack | T3 submitted | T4 confirmed | RTO (T4−T0) | Target met | Blockers / follow-ups |
+| ---------- | --------- | --------- | -------- | ------ | ------------ | ------------ | ----------- | ---------- | --------------------- |
+|            |           |           |          |        |              |              |             |            |                       |
+
+- [ ] **Game-day drill executed in devnet** with all five timestamps captured in the log above.
+- [ ] **Measured RTO recorded and ≤ 15-minute target** (re-run after fixes if not).
+- [ ] **Blockers filed as issues** and assigned owners.
+
 ---
 
 ## 7. Upgrade & Governance Multisig Plan
