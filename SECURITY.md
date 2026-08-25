@@ -101,6 +101,26 @@ Soroban persistent entries (such as each user's `Shares` record) accrue state re
 - **Explicit Maintenance**: Off-chain indexers or maintenance jobs should call the permissionless `touch_user_ttl(user)` to refresh a user's `Shares` TTL. State-changing calls (`deposit`, `withdraw`) already rewrite `Shares` and refresh its TTL during normal operation.
 - **Risk**: A long-dormant user who never transacts and whose entry is never touched could see their `Shares` entry expire and require restoration. Active users, and any indexer running `touch_user_ttl`, are unaffected.
 
+## Centralization-Risk Register
+
+This register documents every owner-only and agent-only capability, the blast radius if the corresponding key is compromised, and the existing mitigation status.
+
+| Capability / Function | Role | Blast Radius (Worst-Case Impact) | Mitigation Status |
+|-----------------------|------|----------------------------------|-------------------|
+| `pause`, `emergency_pause` | Owner | Vault stops accepting deposits/withdrawals, causing denial of service. | accepted risk (required for emergency response) |
+| `unpause` | Owner | Unpausing prematurely during an active exploit could lead to fund drain. | accepted risk |
+| `set_tvl_cap`, `set_user_deposit_cap`, `set_caps`, `set_deposit_limits`, `set_limits` | Owner | Setting caps to zero blocks new deposits; setting excessively high removes deposit guardrails. | partial (limits only restrict future deposits, cannot steal existing funds) |
+| `set_rebalance_cooldown` | Owner | Removing cooldown allows a compromised agent to churn funds rapidly between protocols. | partial (requires both owner and agent compromise for maximum impact) |
+| `set_blend_pool`, `set_dex_pool` | Owner | Redirecting pool addresses to a malicious contract could allow the agent to rebalance funds into an attacker-controlled drain. | mitigated (requires two-step exploit: owner sets pool, agent rebalances) |
+| `update_agent`, `confirm_agent_update`, `cancel_agent_update` | Owner | Replacing the agent with a malicious one allows unauthorized yield reporting and fund churning. | mitigated (two-step timelock with cancellation window) |
+| `schedule_upgrade`, `execute_upgrade`, `cancel_upgrade` | Owner | Upgrading to a malicious WASM contract could allow complete drain of all vault funds. | mitigated (two-step timelock with cancellation window) |
+| `transfer_ownership`, `cancel_ownership_transfer` | Owner | Transferring ownership to an attacker solidifies control over the contract. | mitigated (two-step transfer requires acceptance by new owner) |
+| `emergency_harvest` | Owner | Owner can move funds within authorized protocols; no direct withdrawal possible. | accepted risk (fallback for agent-key rotation) |
+| `set_approval_ttl`, `set_blend_approval_ttl` | Owner | Changing TTL affects how often approvals expire, leading to minor operational griefing. | accepted risk (low impact) |
+| `update_total_assets` | Agent | Agent can falsely report a massive loss, devaluing shares and allowing cheap buy-ins, or falsely report yield to over-mint shares. | partial (capped maximum decrease bounds single-call impact) |
+| `rebalance` | Agent | Agent can move all funds to the most risky whitelisted protocol, or repeatedly churn funds to incur fees. | mitigated (rebalance cooldown limits churn rate; restricted to owner-whitelisted pools) |
+| `harvest` | Agent | Agent can force protocol withdrawals to compound yield; no direct fund drain possible. | accepted risk (funds stay within vault bounds) |
+
 ## Access Control Summary
 
 | Function | Owner | Agent | User | Anyone |
