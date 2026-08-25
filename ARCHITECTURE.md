@@ -42,6 +42,18 @@ Instance storage is used for contract-wide configuration that is read frequently
 
 Persistent storage is used for per-user data that requires efficient access.
 
+| Key | Type | Description |
+|-----|------|-------------|
+| `Balance(Address)` | i128 | User's principal USDC deposit amount |
+| `Shares(Address)` | i128 | User's share balance (proportional ownership) |
+| `UserStrategy(Address)` | Symbol | Per-user strategy preference (storage-only, see below) |
+
+> **`UserStrategy` is storage-only:** `set_user_strategy` / `get_user_strategy` store a
+> per-user preference symbol, but `rebalance()` and `deposit()` never read
+> `DataKey::UserStrategy` — the vault deploys funds pooled to a single `CurrentProtocol`
+> regardless of any individual user's selection. The off-chain AI agent is expected to
+> consume this preference when deciding yield allocation. A user's chosen strategy can
+> therefore diverge from where their share of the pooled funds is actually deployed.
 | Key | Type                    | Description |
 | --- | ----------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------- |
 |     | `Balance(Address)`      | i128        | Deprecated. Retained only to preserve the serialized `DataKey` layout across upgrades; no longer read or written |
