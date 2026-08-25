@@ -20,13 +20,14 @@ dist/
 build/
 target/
 
-# Environment files (never commit secrets)
 .env
 .env.local
 .env.devnet
 .env.testnet
 .env.mainnet
 .env.*.local
+__pycache__/
+*.py[cod]
 
 # Test snapshots (cargo-test / proptest regressions)
 **/test_snapshots/

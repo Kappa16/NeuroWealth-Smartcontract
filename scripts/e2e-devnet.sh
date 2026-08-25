@@ -147,6 +147,14 @@ fi
 log "WASM size: $(wc -c < "$WASM_PATH") bytes"
 save_artifact "wasm_hash.txt" "$(sha256sum "$WASM_PATH" 2>/dev/null || shasum -a 256 "$WASM_PATH")"
 
+# Validate storage layout metadata
+log "Validating contract DataKey storage layout metadata..."
+python3 "$SCRIPT_DIR/check-storage-layout.py" "$WASM_PATH" "$WASM_PATH" \
+  --output "$ARTIFACTS_DIR/storage_layout_diff.txt" || {
+  log "ERROR: Storage layout check failed."
+  exit 1
+}
+
 # ---------------------------------------------------------------------------
 # Identity setup
 # ---------------------------------------------------------------------------
@@ -638,28 +646,92 @@ if [[ "${E2E_TEST_TIMELOCK:-}" == "true" ]]; then
 
   # Check if we should attempt execution or cancellation (for re-run scenario)
   if [[ -f "$ARTIFACTS_DIR/upgrade_timelock_note.txt" ]]; then
-    log "Found previous upgrade schedule, attempting cancellation (safer for E2E)..."
-    CANCEL_OUTPUT=$(run_soroban "Cancel upgrade" \
-      contract invoke \
-      --id "$CONTRACT_ID" \
-      --source e2e-deployer \
-      --network testnet \
-      -- \
-      cancel_upgrade \
-      --owner "$DEPLOYER_ADDR" 2>&1) || {
-      record_fail "cancel_upgrade" "Cancellation failed: $CANCEL_OUTPUT"
-    }
+    if [[ "${E2E_EXECUTE_UPGRADE:-}" == "true" ]]; then
+      log "Attempting execute_upgrade..."
 
-    save_artifact "tx_cancel_upgrade.txt" "$CANCEL_OUTPUT"
+      # Take snapshot before execute_upgrade
+      bash "$SCRIPT_DIR/post-upgrade-smoke.sh" \
+        --mode snapshot \
+        --contract-id "$CONTRACT_ID" \
+        --network testnet \
+        --source e2e-deployer \
+        --snapshot "$ARTIFACTS_DIR/pre_upgrade_snapshot.json" 2>&1 || true
 
-    if echo "$CANCEL_OUTPUT" | grep -qv "FAILED\|error\|Error"; then
-      record_pass "cancel_upgrade"
-      log "Upgrade successfully cancelled."
-      rm -f "$ARTIFACTS_DIR/upgrade_timelock_note.txt"
+      EXEC_OUTPUT=$(run_soroban "Execute upgrade" \
+        contract invoke \
+        --id "$CONTRACT_ID" \
+        --source e2e-deployer \
+        --network testnet \
+        -- \
+        execute_upgrade \
+        --owner "$DEPLOYER_ADDR" 2>&1) || {
+        record_fail "execute_upgrade" "Upgrade execution failed: $EXEC_OUTPUT"
+      }
+
+      save_artifact "tx_execute_upgrade.txt" "$EXEC_OUTPUT"
+
+      if echo "$EXEC_OUTPUT" | grep -qv "FAILED\|error\|Error"; then
+        record_pass "execute_upgrade"
+        log "Upgrade successfully executed."
+        rm -f "$ARTIFACTS_DIR/upgrade_timelock_note.txt"
+
+        # Post-upgrade getter sweep
+        log "Running post-upgrade read-only getter sweep smoke validation..."
+        if bash "$SCRIPT_DIR/post-upgrade-smoke.sh" \
+          --mode verify \
+          --contract-id "$CONTRACT_ID" \
+          --network testnet \
+          --source e2e-deployer \
+          --user "$USER_ADDR" \
+          --snapshot "$ARTIFACTS_DIR/pre_upgrade_snapshot.json" \
+          --output "$ARTIFACTS_DIR/post_upgrade_smoke.txt"; then
+          record_pass "post_upgrade_smoke_sweep"
+        else
+          record_fail "post_upgrade_smoke_sweep" "Post-upgrade getter sweep failed. See artifacts/post_upgrade_smoke.txt"
+        fi
+      fi
+    else
+      log "Found previous upgrade schedule, attempting cancellation (safer for E2E)..."
+      CANCEL_OUTPUT=$(run_soroban "Cancel upgrade" \
+        contract invoke \
+        --id "$CONTRACT_ID" \
+        --source e2e-deployer \
+        --network testnet \
+        -- \
+        cancel_upgrade \
+        --owner "$DEPLOYER_ADDR" 2>&1) || {
+        record_fail "cancel_upgrade" "Cancellation failed: $CANCEL_OUTPUT"
+      }
+
+      save_artifact "tx_cancel_upgrade.txt" "$CANCEL_OUTPUT"
+
+      if echo "$CANCEL_OUTPUT" | grep -qv "FAILED\|error\|Error"; then
+        record_pass "cancel_upgrade"
+        log "Upgrade successfully cancelled."
+        rm -f "$ARTIFACTS_DIR/upgrade_timelock_note.txt"
+      fi
     fi
   fi
 else
   log "Skipping upgrade timelock test (set E2E_TEST_TIMELOCK=true to enable)"
+fi
+
+# ---------------------------------------------------------------------------
+# Scenario 10: Contract Getter Sweep (Smoke Validation)
+# ---------------------------------------------------------------------------
+
+log_section "SCENARIO 10: READ-ONLY GETTER SWEEP SMOKE VALIDATION"
+
+if bash "$SCRIPT_DIR/post-upgrade-smoke.sh" \
+  --mode verify \
+  --contract-id "$CONTRACT_ID" \
+  --network testnet \
+  --source e2e-deployer \
+  --user "$USER_ADDR" \
+  --output "$ARTIFACTS_DIR/post_upgrade_smoke.txt"; then
+  record_pass "getter_sweep_smoke"
+else
+  record_fail "getter_sweep_smoke" "One or more read-only getters failed or returned invalid data. See $ARTIFACTS_DIR/post_upgrade_smoke.txt"
 fi
 
 # ---------------------------------------------------------------------------
