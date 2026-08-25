@@ -123,13 +123,23 @@ fn test_update_agent_emits_event() {
     client.update_agent(&new_agent);
 
     let agent_events = find_events_by_topic(env.events().all(), &env, TOPIC_AGENT_UPDATED);
-    assert_eq!(agent_events.len(), 1, "Exactly one agent event should be emitted");
+    assert_eq!(
+        agent_events.len(),
+        1,
+        "Exactly one agent event should be emitted"
+    );
 
     let (_, _, data) = &agent_events[0];
-    let event = AgentUpdatedEvent::try_from_val(&env, data)
-        .expect("Should be a valid AgentUpdatedEvent");
-    assert_eq!(event.old_agent, old_agent, "old_agent should match previous agent");
-    assert_eq!(event.new_agent, new_agent, "new_agent should match updated agent");
+    let event =
+        AgentUpdatedEvent::try_from_val(&env, data).expect("Should be a valid AgentUpdatedEvent");
+    assert_eq!(
+        event.old_agent, old_agent,
+        "old_agent should match previous agent"
+    );
+    assert_eq!(
+        event.new_agent, new_agent,
+        "new_agent should match updated agent"
+    );
 }
 
 #[test]
@@ -543,6 +553,62 @@ fn test_new_owner_can_use_owner_functions_after_transfer() {
     // New owner can unpause
     client.unpause(&new_owner);
     assert!(!client.is_paused());
+}
+
+/// Test that the pending owner cannot cancel an ownership transfer (Issue #573).
+/// Only the current owner should be able to cancel, preventing griefing of
+/// legitimate ownership rotations.
+#[test]
+fn test_pending_owner_cannot_cancel_ownership_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let pending_owner = Address::generate(&env);
+    client.transfer_ownership(&pending_owner);
+
+    assert_eq!(client.get_pending_owner().unwrap(), pending_owner);
+
+    // The pending owner tries to cancel — should fail with CallerIsNotOwner
+    let result = client.try_cancel_ownership_transfer();
+    assert!(
+        result.is_err(),
+        "pending owner should not be able to cancel ownership transfer"
+    );
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(34))),
+        "should fail with CallerIsNotOwner error"
+    );
+}
+
+/// Test that an uninvolved third party cannot cancel an ownership transfer (Issue #573).
+/// Only the current owner should be able to cancel.
+#[test]
+fn test_third_party_cannot_cancel_ownership_transfer() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, _owner, _usdc_token) = setup_vault_with_token(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+
+    let pending_owner = Address::generate(&env);
+    client.transfer_ownership(&pending_owner);
+
+    // An uninvolved third party tries to cancel — should fail with CallerIsNotOwner
+    let third_party = Address::generate(&env);
+    let result = client.try_cancel_ownership_transfer();
+    assert!(
+        result.is_err(),
+        "third party should not be able to cancel ownership transfer"
+    );
+    assert_eq!(
+        result,
+        Err(Ok(soroban_sdk::Error::from_contract_error(34))),
+        "should fail with CallerIsNotOwner error"
+    );
 }
 
 #[test]

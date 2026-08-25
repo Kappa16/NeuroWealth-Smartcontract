@@ -10,6 +10,7 @@ This changelog is tied to the vault contract `Version` storage value. Each relea
 
 ## [Unreleased]
 <!-- Add entries below. Format: `- Short description (Issue #N).` -->
+- Document `harvest()` in README, ARCHITECTURE, SECURITY, and the state machine; add dedicated idle/deployed asset breakdown tests (Issues #499, #498, #501).
 <!-- If this PR bumps get_version(), note the new Version value here. -->
 - **Cross-contract call surface audit (Issue #566):** Added comprehensive table of all 8 external contract invocations across USDC Token, Blend Pool, and DEX Pool contracts, detailing expected success paths, revert behaviors, partial-fill mechanisms, vault accounting reactions, and mapping edge cases to regression tests in `ARCHITECTURE.md`.
 - **Defense-in-depth reentrancy test suite (Issue #567):** Added `test_reentrancy_defense.rs` featuring a mock re-entrant token (`ReentrantMockToken`) to assert that hypothetical transfer callbacks cannot corrupt share accounting or execute double-withdrawals under Checks-Effects-Interactions (CEI) ordering.

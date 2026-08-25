@@ -203,6 +203,26 @@ Soroban persistent entries (such as each user's `Shares` record) accrue state re
 - **Explicit Maintenance**: Off-chain indexers or maintenance jobs should call the permissionless `touch_user_ttl(user)` to refresh a user's `Shares` TTL. State-changing calls (`deposit`, `withdraw`) already rewrite `Shares` and refresh its TTL during normal operation.
 - **Risk**: A long-dormant user who never transacts and whose entry is never touched could see their `Shares` entry expire and require restoration. Active users, and any indexer running `touch_user_ttl`, are unaffected.
 
+## Centralization-Risk Register
+
+This register documents every owner-only and agent-only capability, the blast radius if the corresponding key is compromised, and the existing mitigation status.
+
+| Capability / Function | Role | Blast Radius (Worst-Case Impact) | Mitigation Status |
+|-----------------------|------|----------------------------------|-------------------|
+| `pause`, `emergency_pause` | Owner | Vault stops accepting deposits/withdrawals, causing denial of service. | accepted risk (required for emergency response) |
+| `unpause` | Owner | Unpausing prematurely during an active exploit could lead to fund drain. | accepted risk |
+| `set_tvl_cap`, `set_user_deposit_cap`, `set_caps`, `set_deposit_limits`, `set_limits` | Owner | Setting caps to zero blocks new deposits; setting excessively high removes deposit guardrails. | partial (limits only restrict future deposits, cannot steal existing funds) |
+| `set_rebalance_cooldown` | Owner | Removing cooldown allows a compromised agent to churn funds rapidly between protocols. | partial (requires both owner and agent compromise for maximum impact) |
+| `set_blend_pool`, `set_dex_pool` | Owner | Redirecting pool addresses to a malicious contract could allow the agent to rebalance funds into an attacker-controlled drain. | mitigated (requires two-step exploit: owner sets pool, agent rebalances) |
+| `update_agent`, `confirm_agent_update`, `cancel_agent_update` | Owner | Replacing the agent with a malicious one allows unauthorized yield reporting and fund churning. | mitigated (two-step timelock with cancellation window) |
+| `schedule_upgrade`, `execute_upgrade`, `cancel_upgrade` | Owner | Upgrading to a malicious WASM contract could allow complete drain of all vault funds. | mitigated (two-step timelock with cancellation window) |
+| `transfer_ownership`, `cancel_ownership_transfer` | Owner | Transferring ownership to an attacker solidifies control over the contract. | mitigated (two-step transfer requires acceptance by new owner) |
+| `emergency_harvest` | Owner | Owner can move funds within authorized protocols; no direct withdrawal possible. | accepted risk (fallback for agent-key rotation) |
+| `set_approval_ttl`, `set_blend_approval_ttl` | Owner | Changing TTL affects how often approvals expire, leading to minor operational griefing. | accepted risk (low impact) |
+| `update_total_assets` | Agent | Agent can falsely report a massive loss, devaluing shares and allowing cheap buy-ins, or falsely report yield to over-mint shares. | partial (capped maximum decrease bounds single-call impact) |
+| `rebalance` | Agent | Agent can move all funds to the most risky whitelisted protocol, or repeatedly churn funds to incur fees. | mitigated (rebalance cooldown limits churn rate; restricted to owner-whitelisted pools) |
+| `harvest` | Agent | Agent can force protocol withdrawals to compound yield; no direct fund drain possible. | accepted risk (funds stay within vault bounds) |
+
 ## Access Control Summary
 
 | Function | Owner | Agent | User | Anyone |
@@ -215,6 +235,7 @@ Soroban persistent entries (such as each user's `Shares` record) accrue state re
 | withdraw | - | - | yes | - |
 | withdraw_all | - | - | yes | - |
 | rebalance | - | yes | - | - |
+| harvest | - | yes | - | - |
 | pause | yes | - | - | - |
 | emergency_pause | yes | - | - | - |
 | unpause | yes | - | - | - |
@@ -257,6 +278,133 @@ to compound yield during this window:
 |----------|-------|-------|------|--------|
 | emergency_harvest | yes | - | - | - |
 
+## Pause-Semantics Matrix
+
+> **Issue #601** — Definitive table of which functions are blocked vs. allowed
+> while the vault is paused. This table is the source of truth; the exhaustive
+> test in
+> [`neurowealth-vault/contracts/vault/src/tests/test_pause.rs`](neurowealth-vault/contracts/vault/src/tests/test_pause.rs)
+> encodes it as parameterised assertions so future functions cannot silently
+> bypass pause checks.
+
+### Legend
+
+| Symbol | Meaning |
+|--------|---------|
+| 🔴 BLOCKED | Function panics with `VaultError::Paused` (#35) when the vault is paused |
+| 🟢 ALLOWED | Function executes normally while the vault is paused |
+
+### State-Changing Functions
+
+| Function | Caller | Paused Behaviour | Rationale |
+|----------|--------|-----------------|-----------|
+| `deposit` | User | 🔴 BLOCKED | No new deposits accepted during an emergency |
+| `batch_deposit` | User | 🔴 BLOCKED | Same reason as `deposit` |
+| `withdraw` | User | 🔴 BLOCKED | See note below on withdrawal semantics |
+| `withdraw_all` | User | 🔴 BLOCKED | See note below on withdrawal semantics |
+| `rebalance` | Agent | 🔴 BLOCKED | No fund movement while vault is paused |
+| `harvest` | Agent | 🔴 BLOCKED | No protocol interaction while paused |
+| `schedule_upgrade` | Owner | 🔴 BLOCKED | Upgrades must not be proposed during an emergency |
+| `execute_upgrade` | Owner | 🔴 BLOCKED | Execution of a pending upgrade requires unpaused vault |
+| `cancel_upgrade` | Owner | 🟢 ALLOWED | Cancelling a malicious upgrade must be possible even while paused |
+| `update_total_assets` | Agent + Owner | 🟢 ALLOWED | Yield/loss reporting should remain available for bookkeeping |
+| `emergency_harvest` | Owner | 🟢 ALLOWED | Owner fallback for compounding yield during an agent-key rotation; explicitly bypasses pause |
+| `pause` | Owner | 🟢 ALLOWED | Must be callable to transition into the paused state |
+| `unpause` | Owner | 🟢 ALLOWED | Must be callable to resume normal operations |
+| `emergency_pause` | Owner | 🟢 ALLOWED | Must be callable even when already paused (idempotent) |
+| `update_agent` | Owner | 🟢 ALLOWED | Agent rotation is a recovery action; blocking it during a pause would worsen an incident |
+| `confirm_agent_update` | Owner | 🟢 ALLOWED | Completing agent rotation must not be blocked |
+| `cancel_agent_update` | Owner | 🟢 ALLOWED | Cancelling a malicious agent update must always be possible |
+| `transfer_ownership` | Owner | 🟢 ALLOWED | Ownership rotation is a recovery action |
+| `accept_ownership` | Pending owner | 🟢 ALLOWED | Completing ownership transfer must not be blocked |
+| `cancel_ownership_transfer` | Owner | 🟢 ALLOWED | Must remain available during emergencies |
+| `set_tvl_cap` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_user_deposit_cap` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_caps` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_deposit_limits` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_limits` (deprecated) | Owner | 🟢 ALLOWED | Same as `set_caps` |
+| `set_blend_pool` | Owner | 🟢 ALLOWED | Pool reconfiguration is a recovery action |
+| `set_dex_pool` | Owner | 🟢 ALLOWED | Pool reconfiguration is a recovery action |
+| `set_rebalance_cooldown` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_approval_ttl` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_blend_approval_ttl` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_max_consecutive_failures` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_user_strategy` | User | 🟢 ALLOWED | Preference storage; no fund movement |
+| `touch_user_ttl` | Anyone | 🟢 ALLOWED | Permissionless TTL maintenance; no fund movement |
+| `initialize` | Deployer | 🟢 ALLOWED | Initialization runs before pause is even possible |
+
+### Read-Only / View Functions
+
+All view/getter functions are 🟢 **ALLOWED** while paused. They perform no
+state changes and emit no events. Blocking them during a pause would prevent
+operators from assessing vault state.
+
+| Function | Paused Behaviour |
+|----------|-----------------|
+| `is_paused` | 🟢 ALLOWED |
+| `get_balance` | 🟢 ALLOWED |
+| `get_total_deposits` | 🟢 ALLOWED |
+| `get_total_assets` | 🟢 ALLOWED |
+| `get_total_shares` | 🟢 ALLOWED |
+| `get_shares` | 🟢 ALLOWED |
+| `get_users_with_shares` | 🟢 ALLOWED |
+| `get_user_info` | 🟢 ALLOWED |
+| `get_owner` | 🟢 ALLOWED |
+| `get_agent` | 🟢 ALLOWED |
+| `get_version` | 🟢 ALLOWED |
+| `get_usdc_token` | 🟢 ALLOWED |
+| `get_current_protocol` | 🟢 ALLOWED |
+| `get_blend_pool` | 🟢 ALLOWED |
+| `get_dex_pool` | 🟢 ALLOWED |
+| `get_tvl_cap` | 🟢 ALLOWED |
+| `get_user_deposit_cap` | 🟢 ALLOWED |
+| `get_min_deposit` | 🟢 ALLOWED |
+| `get_max_deposit` | 🟢 ALLOWED |
+| `get_idle_balance` | 🟢 ALLOWED |
+| `get_deployed_assets` | 🟢 ALLOWED |
+| `get_asset_breakdown` | 🟢 ALLOWED |
+| `get_exchange_rate` | 🟢 ALLOWED |
+| `get_rebalance_cooldown` | 🟢 ALLOWED |
+| `get_last_rebalance_ledger` | 🟢 ALLOWED |
+| `get_approval_ttl` | 🟢 ALLOWED |
+| `get_blend_approval_ttl` | 🟢 ALLOWED |
+| `get_max_consecutive_failures` | 🟢 ALLOWED |
+| `get_consecutive_failures` | 🟢 ALLOWED |
+| `get_pending_upgrade` | 🟢 ALLOWED |
+| `get_pending_agent_update` | 🟢 ALLOWED |
+| `get_pending_owner` | 🟢 ALLOWED |
+| `get_pending_ownership` | 🟢 ALLOWED |
+| `get_user_strategy` | 🟢 ALLOWED |
+| `preview_deposit_to_shares` | 🟢 ALLOWED |
+| `preview_shares_to_assets` | 🟢 ALLOWED |
+| `preview_withdraw` | 🟢 ALLOWED |
+| `convert_to_shares` | 🟢 ALLOWED |
+| `convert_to_assets` | 🟢 ALLOWED |
+
+### Note on Withdrawal Semantics
+
+Both `withdraw` and `withdraw_all` are **blocked** while the vault is paused.
+This is a deliberate design choice:
+
+- The pause mechanism is an **emergency stop** intended to freeze all fund
+  movement while a security incident is investigated.
+- Allowing withdrawals while paused could enable a race between an attacker
+  (draining funds) and the security team (trying to stop the drain).
+- The owner-compromise runbook documents how to unpause safely once the
+  incident is resolved, at which point normal withdrawals resume immediately.
+
+If a future version of the protocol wishes to allow emergency withdrawals
+while paused, this would require a separate "withdrawal-allowed" flag that is
+independent of the pause flag, along with careful analysis of reentrancy and
+ordering risks.
+
+### Checklist for Adding New Functions
+
+When adding a new contract function, the author **must** update this matrix and
+the corresponding test in `test_pause.rs`. The PR review checklist
+(`.github/pull_request_template.md`) includes a pause-semantics item for this
+purpose.
+
 ## Security Best Practices Implemented
 
 1. **Checks-Effects-Interactions Pattern**: All state updates happen before external calls
@@ -270,6 +418,8 @@ to compound yield during this window:
 
 If the owner keypair is suspected or confirmed to be compromised, follow this
 sequence immediately. Every step that requires owner auth is marked **[owner]**.
+
+For agent-key compromise procedures, see the [Agent-Key Compromise Runbook](docs/AGENT_KEY_COMPROMISE_RUNBOOK.md).
 
 ### Step 1 — Pause the vault (within minutes)
 

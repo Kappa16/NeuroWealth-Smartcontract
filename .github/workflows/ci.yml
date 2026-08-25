@@ -198,6 +198,14 @@ jobs:
                 python3 scripts/update_wasm_baseline.py "$WASM_SIZE" "$GITHUB_SHA" "$GITHUB_REF_NAME" "$BASELINE_FILE"
               fi
 
+              # Validate storage layout compatibility gate
+              mkdir -p scripts/e2e-artifacts
+              python3 scripts/check-storage-layout.py \
+                "$WASM_FILE" \
+                "$WASM_FILE" \
+                --migration-doc docs/UPGRADE_MIGRATION.md \
+                --output scripts/e2e-artifacts/storage_layout_diff.txt
+
               # Export the WASM path for the artifact upload step.
               echo "WASM_FILE=$WASM_FILE" >> "$GITHUB_ENV"
               ;;
@@ -259,11 +267,17 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Verify access control table accuracy
+      - name: Verify access control table accuracy (spec)
         run: bash scripts/check-access-control.sh
+
+      - name: Verify auth matrix against source (lib.rs)
+        run: python3 scripts/check-auth-matrix.py
 
       - name: Verify DataKey::Balance deprecation
         run: bash scripts/check-balance-deprecation.sh
+
+      - name: Verify DataKey docs match lib.rs
+        run: bash scripts/check-data-key-docs.sh
 
   changes:
     name: Detect changes
@@ -402,7 +416,7 @@ jobs:
             -o "$WASM_FILE"
 
       - name: Make scripts executable
-        run: chmod +x scripts/e2e-devnet.sh scripts/e2e-restore.sh
+        run: chmod +x scripts/*.sh scripts/*.py
 
       - name: Run E2E devnet validation
         id: e2e

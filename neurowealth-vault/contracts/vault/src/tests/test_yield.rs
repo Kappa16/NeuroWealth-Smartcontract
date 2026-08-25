@@ -148,12 +148,19 @@ fn test_yield_emits_event() {
     client.update_total_assets(&agent, &new_total, &false, &0);
 
     let assets_events = find_events_by_topic(env.events().all(), &env, TOPIC_ASSETS_UPDATED);
-    assert_eq!(assets_events.len(), 1, "Exactly one assets event should be emitted");
+    assert_eq!(
+        assets_events.len(),
+        1,
+        "Exactly one assets event should be emitted"
+    );
 
     let (_, _, data) = &assets_events[0];
-    let event = AssetsUpdatedEvent::try_from_val(&env, data)
-        .expect("Should be a valid AssetsUpdatedEvent");
-    assert_eq!(event.old_total, deposit_amount, "old_total should be the deposit amount");
+    let event =
+        AssetsUpdatedEvent::try_from_val(&env, data).expect("Should be a valid AssetsUpdatedEvent");
+    assert_eq!(
+        event.old_total, deposit_amount,
+        "old_total should be the deposit amount"
+    );
     assert_eq!(event.new_total, new_total, "new_total should reflect yield");
 }
 

@@ -216,7 +216,10 @@ fn test_set_dex_pool_non_contract_does_not_persist() {
 
     // Use try_set_dex_pool to catch the error instead of panicking.
     let result = vault_client.try_set_dex_pool(&owner, &non_contract);
-    assert!(result.is_err(), "set_dex_pool with non-contract address must fail");
+    assert!(
+        result.is_err(),
+        "set_dex_pool with non-contract address must fail"
+    );
 
     // The DEX pool storage must remain untouched after the failed call.
     assert_eq!(
@@ -393,7 +396,10 @@ fn test_dex_partial_fill_rebalance_accounts_for_actual_amount() {
     );
 
     // The protocol is still tracked as "dex" (rebalance succeeded with partial fill).
-    assert_eq!(vault_client.get_current_protocol(), Symbol::new(&env, "dex"));
+    assert_eq!(
+        vault_client.get_current_protocol(),
+        Symbol::new(&env, "dex")
+    );
 }
 
 // ─── Issue #515: DEX pool rotation mid-deployment ────────────────────────────
@@ -428,7 +434,10 @@ fn test_set_dex_pool_rotation_while_deployed_strands_funds() {
         deposit_amount,
         "funds must be deployed to the old pool"
     );
-    assert_eq!(vault_client.get_current_protocol(), Symbol::new(&env, "dex"));
+    assert_eq!(
+        vault_client.get_current_protocol(),
+        Symbol::new(&env, "dex")
+    );
 
     // Rotate the DEX pool address while funds are still deployed.
     // No guard currently exists — this succeeds.
