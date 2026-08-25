@@ -1520,8 +1520,6 @@ impl NeuroWealthVault {
         Self::require_within_tvl_cap(&env, amount);
 
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
-        let token_client = token::Client::new(&env, &usdc_token);
-        token_client.transfer(&user, &env.current_contract_address(), &amount);
 
         let total: i128 = env
             .storage()
@@ -1531,7 +1529,6 @@ impl NeuroWealthVault {
         let new_total = total
             .checked_add(amount)
             .expect("vault: total deposits overflow");
-        env.storage().instance().set(&DataKey::TotalDeposits, &new_total);
 
         // Mint shares based on current share price and update total assets.
         // Inflation-attack mitigation: reject any deposit that would round down
@@ -1554,24 +1551,39 @@ impl NeuroWealthVault {
         let new_user_shares = current_shares
             .checked_add(shares_to_mint)
             .expect("vault: user shares overflow");
-        env.storage().persistent().set(&DataKey::Shares(user.clone()), &new_user_shares);
 
-        // Register the user in the active-share index the first time they hold
-        // non-zero shares, so the `get_users_with_shares` indexer view can page
-        // over holders (Issue #440). The `current_shares == 0` gate also covers a
-        // user who fully withdrew earlier and is re-entering; `add_to_user_index`
-        // dedupes so their slot is not duplicated.
-        if current_shares == 0 {
-            Self::add_to_user_index(&env, &user);
-        }
-
-        // Set default strategy for first-time depositors
-        if current_shares == 0
+        let is_first_shares = current_shares == 0;
+        let set_default_strategy = is_first_shares
             && !env
                 .storage()
                 .persistent()
-                .has(&DataKey::UserStrategy(user.clone()))
-        {
+                .has(&DataKey::UserStrategy(user.clone()));
+
+        // Update total shares
+        let total_shares: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalShares)
+            .unwrap_or(0_i128);
+        let new_total_shares = total_shares
+            .checked_add(shares_to_mint)
+            .expect("vault: total shares overflow");
+
+        // Update total assets (principal + yield)
+        let total_assets = Self::get_total_assets_internal(&env);
+        let new_total_assets = total_assets
+            .checked_add(amount)
+            .expect("vault: total assets overflow");
+
+        // --- Write storage state before external calls ---
+        env.storage().instance().set(&DataKey::TotalDeposits, &new_total);
+        env.storage().persistent().set(&DataKey::Shares(user.clone()), &new_user_shares);
+
+        if is_first_shares {
+            Self::add_to_user_index(&env, &user);
+        }
+
+        if set_default_strategy {
             let default_strategy = Symbol::new(&env, "balanced");
             env.storage()
                 .persistent()
@@ -1587,30 +1599,18 @@ impl NeuroWealthVault {
             );
         }
 
-        // Update total shares
-        let total_shares: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::TotalShares)
-            .unwrap_or(0_i128);
-        let new_total_shares = total_shares
-            .checked_add(shares_to_mint)
-            .expect("vault: total shares overflow");
         env.storage().instance().set(&DataKey::TotalShares, &new_total_shares);
-
-        // Update total assets (principal + yield)
-        let total_assets = Self::get_total_assets_internal(&env);
-        let new_total_assets = total_assets
-            .checked_add(amount)
-            .expect("vault: total assets overflow");
         env.storage().instance().set(&DataKey::TotalAssets, &new_total_assets);
+
+        // --- Cross-contract call: transfer tokens after state updates ---
+        let token_client = token::Client::new(&env, &usdc_token);
+        token_client.transfer(&user, &env.current_contract_address(), &amount);
 
         env.events().publish(
             (TOPIC_DEPOSIT, user.clone()),
             DepositEvent {
                 user,
                 amount,
-                // Shares minted for this deposit
                 shares: shares_to_mint,
             },
         );
@@ -1671,25 +1671,12 @@ impl NeuroWealthVault {
             Self::require_within_tvl_cap(&env, total_amount);
         }
 
-        // Second pass: execute transfers.
-        let token_client = token::Client::new(&env, &usdc_token);
-        for i in 0..total_entries {
-            let (_token, amount) = entries.get(i).unwrap();
-            token_client.transfer(&user, &env.current_contract_address(), &amount);
-        }
-
         // Update total deposits and mint shares once for the aggregate.
         let total: i128 = env
             .storage()
             .instance()
             .get(&DataKey::TotalDeposits)
             .unwrap_or(0_i128);
-        env.storage().instance().set(
-            &DataKey::TotalDeposits,
-            &(total
-                .checked_add(total_amount)
-                .expect("batch_deposit: total deposits overflow")),
-        );
 
         let shares_to_mint = Self::convert_to_shares_internal(&env, total_amount);
         Self::require(
@@ -1703,6 +1690,26 @@ impl NeuroWealthVault {
             .persistent()
             .get(&DataKey::Shares(user.clone()))
             .unwrap_or(0_i128);
+
+        let set_default_strategy = current_shares == 0
+            && !env
+                .storage()
+                .persistent()
+                .has(&DataKey::UserStrategy(user.clone()));
+
+        let total_shares: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::TotalShares)
+            .unwrap_or(0_i128);
+
+        // --- Write storage state before external calls ---
+        env.storage().instance().set(
+            &DataKey::TotalDeposits,
+            &(total
+                .checked_add(total_amount)
+                .expect("batch_deposit: total deposits overflow")),
+        );
         env.storage().persistent().set(
             &DataKey::Shares(user.clone()),
             &(current_shares
@@ -1710,12 +1717,7 @@ impl NeuroWealthVault {
                 .expect("batch_deposit: shares overflow")),
         );
 
-        if current_shares == 0
-            && !env
-                .storage()
-                .persistent()
-                .has(&DataKey::UserStrategy(user.clone()))
-        {
+        if set_default_strategy {
             let default_strategy = Symbol::new(&env, "balanced");
             env.storage()
                 .persistent()
@@ -1730,17 +1732,19 @@ impl NeuroWealthVault {
             );
         }
 
-        let total_shares: i128 = env
-            .storage()
-            .instance()
-            .get(&DataKey::TotalShares)
-            .unwrap_or(0_i128);
         env.storage().instance().set(
             &DataKey::TotalShares,
             &(total_shares
                 .checked_add(shares_to_mint)
                 .expect("batch_deposit: total shares overflow")),
         );
+
+        // --- Execute transfers (Cross-Contract Calls) ---
+        let token_client = token::Client::new(&env, &usdc_token);
+        for i in 0..total_entries {
+            let (_token, amount) = entries.get(i).unwrap();
+            token_client.transfer(&user, &env.current_contract_address(), &amount);
+        }
 
         for i in 0..total_entries {
             let (_token, amount) = entries.get(i).unwrap();
@@ -1800,54 +1804,7 @@ impl NeuroWealthVault {
         Self::require_not_paused(&env);
         Self::require_positive_amount(&env, amount);
 
-        // Check if funds are deployed in Blend and need to be retrieved
-        let current_protocol: Symbol = env
-            .storage()
-            .instance()
-            .get(&DataKey::CurrentProtocol)
-            .unwrap_or(symbol_short!("none"));
-
-        let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
-        let token_client = token::Client::new(&env, &usdc_token);
-
-        // We use actual_to_return to track how much we can really give back.
-        // Initially, we assume we can fulfill the whole request.
-        let mut actual_to_return = amount;
-
-        if current_protocol == symbol_short!("blend") || current_protocol == symbol_short!("dex") {
-            // Check vault's USDC balance
-            let vault_balance = token_client.balance(&env.current_contract_address());
-
-            // If vault doesn't have enough USDC, try to withdraw from the active protocol
-            if vault_balance < amount {
-                // Calculate how much we need to withdraw
-                let needed = amount
-                    .checked_sub(vault_balance)
-                .expect("vault: withdrawal underflow");
-
-                // Attempt to withdraw from the active protocol (Blend or DEX).
-                // If this returns less than needed, we will reconcile below
-                let _withdrawn =
-                    Self::withdraw_amount_from_protocol(&env, &current_protocol, needed, 0);
-
-                // RECONCILIATION: Check actual available USDC after the withdrawal.
-                // We cap the withdrawal to what the vault actually has available.
-                let available_usdc = token_client.balance(&env.current_contract_address());
-                actual_to_return = min(amount, available_usdc);
-            }
-        }
-
-        Self::require(
-            &env,
-            actual_to_return > 0,
-            VaultError::InsufficientLiquidity,
-        );
-
-        // Share-based withdrawal:
-        // - Convert reconciled asset amount to shares
-        // - Burn shares from user
-        // - Return proportional assets based on current share price
-
+        // --- Upfront Storage Reads & Share Validation ---
         let user_shares: i128 = env
             .storage()
             .persistent()
@@ -1863,11 +1820,54 @@ impl NeuroWealthVault {
             VaultError::NoAssetsToWithdraw,
         );
 
-        // We use actual_to_return to determine how many shares to burn.
-        // If Blend returned less than needed, the user will receive a partial
-        // withdrawal and keep their remaining shares.
-        // Use ceiling division to prevent dust attacks (ensure at least 1 share burned when assets > 0).
-        let shares_to_burn = Self::convert_to_shares_internal_ceil(&env, actual_to_return);
+        let initial_shares_to_burn = Self::convert_to_shares_internal_ceil_with_totals(amount, total_shares, total_assets);
+        Self::require(
+            &env,
+            initial_shares_to_burn > 0,
+            VaultError::SharesToBurnMustBePositive,
+        );
+        Self::require(
+            &env,
+            user_shares >= initial_shares_to_burn,
+            VaultError::InsufficientSharesForAmount,
+        );
+
+        let current_protocol: Symbol = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentProtocol)
+            .unwrap_or(symbol_short!("none"));
+
+        let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
+        let token_client = token::Client::new(&env, &usdc_token);
+
+        let mut actual_to_return = amount;
+
+        // Pull liquidity from protocol if needed
+        if current_protocol == symbol_short!("blend") || current_protocol == symbol_short!("dex") {
+            let vault_balance = token_client.balance(&env.current_contract_address());
+
+            if vault_balance < amount {
+                let needed = amount
+                    .checked_sub(vault_balance)
+                    .expect("vault: withdrawal underflow");
+
+                let _withdrawn =
+                    Self::withdraw_amount_from_protocol(&env, &current_protocol, needed, 0);
+
+                let available_usdc = token_client.balance(&env.current_contract_address());
+                actual_to_return = min(amount, available_usdc);
+            }
+        }
+
+        Self::require(
+            &env,
+            actual_to_return > 0,
+            VaultError::InsufficientLiquidity,
+        );
+
+        // Re-calculate shares to burn and assets to return using the upfront read totals
+        let shares_to_burn = Self::convert_to_shares_internal_ceil_with_totals(actual_to_return, total_shares, total_assets);
         Self::require(
             &env,
             shares_to_burn > 0,
@@ -1879,10 +1879,7 @@ impl NeuroWealthVault {
             VaultError::InsufficientSharesForAmount,
         );
 
-        // Calculate actual assets to return based on burned shares.
-        // Due to integer division, this may be slightly less than `actual_to_return`,
-        // but never more (prevents over-withdrawal due to rounding).
-        let usdc_to_return = Self::convert_to_assets_internal(&env, shares_to_burn);
+        let usdc_to_return = Self::convert_to_assets_internal_with_totals(shares_to_burn, total_shares, total_assets);
 
         // Update user shares and total shares
         let new_user_shares = user_shares
@@ -1895,7 +1892,6 @@ impl NeuroWealthVault {
             .expect("vault: withdrawal underflow");
         env.storage().instance().set(&DataKey::TotalShares, &new_total_shares);
 
-        // Update total assets (principal + yield)
         let new_total_assets = total_assets
             .checked_sub(usdc_to_return)
             .expect("vault: withdrawal underflow");
@@ -1958,16 +1954,7 @@ impl NeuroWealthVault {
 
         Self::require_not_paused(&env);
 
-        // Check if funds are deployed in Blend and need to be retrieved
-        let current_protocol: Symbol = env
-            .storage()
-            .instance()
-            .get(&DataKey::CurrentProtocol)
-            .unwrap_or(symbol_short!("none"));
-
-        let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
-        let token_client = token::Client::new(&env, &usdc_token);
-
+        // --- Upfront Storage Reads & Share Validation ---
         let user_shares: i128 = env
             .storage()
             .persistent()
@@ -1983,33 +1970,34 @@ impl NeuroWealthVault {
             VaultError::NoAssetsToWithdraw,
         );
 
-        // Calculate assets user is entitled to based on their shares
-        let entitled_amount = Self::convert_to_assets_internal(&env, user_shares);
+        let current_protocol: Symbol = env
+            .storage()
+            .instance()
+            .get(&DataKey::CurrentProtocol)
+            .unwrap_or(symbol_short!("none"));
+
+        let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
+        let token_client = token::Client::new(&env, &usdc_token);
+
+        let entitled_amount = Self::convert_to_assets_internal_with_totals(user_shares, total_shares, total_assets);
         let mut usdc_to_return = entitled_amount;
         let mut shares_to_burn = user_shares;
 
         if current_protocol == symbol_short!("blend") || current_protocol == symbol_short!("dex") {
-            // Check vault's USDC balance
             let vault_balance = token_client.balance(&env.current_contract_address());
 
-            // If vault doesn't have enough USDC, try to withdraw from the active protocol
             if vault_balance < entitled_amount {
-                // Attempt to withdraw from the active protocol (Blend or DEX)
                 let needed = entitled_amount
                     .checked_sub(vault_balance)
                     .expect("vault: withdrawal underflow");
                 let _ = Self::withdraw_amount_from_protocol(&env, &current_protocol, needed, 0);
 
-                // RECONCILIATION: Check actual available USDC after the potential withdrawal
                 let available_usdc = token_client.balance(&env.current_contract_address());
 
-                // If vault has less than entitled, we cap the withdrawal.
-                // The user receives what's available and keeps their remaining shares.
                 if available_usdc < entitled_amount {
                     usdc_to_return = available_usdc;
                     Self::require(&env, usdc_to_return > 0, VaultError::NoLiquidityAvailable);
-                    // Use ceiling division to prevent dust attacks (ensure at least 1 share burned).
-                    shares_to_burn = Self::convert_to_shares_internal_ceil(&env, usdc_to_return);
+                    shares_to_burn = Self::convert_to_shares_internal_ceil_with_totals(usdc_to_return, total_shares, total_assets);
                 }
             }
         }
@@ -2017,19 +2005,17 @@ impl NeuroWealthVault {
         Self::require(&env, usdc_to_return > 0, VaultError::NoAssetsToReturn);
         Self::require(&env, shares_to_burn > 0, VaultError::NoSharesToBurn);
 
-        // Update user shares
+        // Update user shares & total shares & total assets
         let new_user_shares = user_shares
             .checked_sub(shares_to_burn)
             .expect("vault: withdrawal underflow");
         env.storage().persistent().set(&DataKey::Shares(user.clone()), &new_user_shares);
 
-        // Update total shares
         let new_total_shares = total_shares
             .checked_sub(shares_to_burn)
             .expect("vault: withdrawal underflow");
         env.storage().instance().set(&DataKey::TotalShares, &new_total_shares);
 
-        // Update total assets
         let new_total_assets = total_assets
             .checked_sub(usdc_to_return)
             .expect("vault: withdrawal underflow");
@@ -2038,8 +2024,6 @@ impl NeuroWealthVault {
         Self::reduce_total_deposits_on_withdraw(&env, usdc_to_return);
 
         // Transfer USDC to user
-        let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
-        let token_client = token::Client::new(&env, &usdc_token);
         token_client.transfer(&env.current_contract_address(), &user, &usdc_to_return);
 
         env.events().publish(
@@ -4183,27 +4167,35 @@ impl NeuroWealthVault {
         }
 
         // CRITICAL SECURITY CHECK: Verify vault actually holds sufficient USDC
-        // This prevents the agent from inflating total_assets beyond what the vault can pay out
-        // We must include both idle funds in vault AND funds deployed to Blend
+        // Pre-read all storage keys before executing cross-contract balance calls
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
-        let token_client = token::Client::new(&env, &usdc_token);
-        let vault_balance = token_client.balance(&env.current_contract_address());
-
-        let mut total_available = vault_balance;
-
         let current_protocol: Symbol = env
             .storage()
             .instance()
             .get(&DataKey::CurrentProtocol)
             .unwrap_or(symbol_short!("none"));
 
-        if current_protocol == symbol_short!("blend")
-            && env.storage().instance().has(&DataKey::BlendPool)
-        {
-            let blend_pool: Address = env.storage().instance().get(&DataKey::BlendPool).unwrap();
+        let blend_pool: Option<Address> = if current_protocol == symbol_short!("blend") {
+            env.storage().instance().get(&DataKey::BlendPool)
+        } else {
+            None
+        };
+
+        let dex_pool: Option<Address> = if current_protocol == symbol_short!("dex") {
+            env.storage().instance().get(&DataKey::DexPool)
+        } else {
+            None
+        };
+
+        // --- Cross-Contract Calls ---
+        let token_client = token::Client::new(&env, &usdc_token);
+        let vault_balance = token_client.balance(&env.current_contract_address());
+        let mut total_available = vault_balance;
+
+        if let Some(pool) = blend_pool {
             let deployed_balance = BlendPoolClient::get_balance(
                 &env,
-                &blend_pool,
+                &pool,
                 &usdc_token,
                 &env.current_contract_address(),
             );
@@ -4212,13 +4204,10 @@ impl NeuroWealthVault {
                 .expect("vault: total available overflow");
         }
 
-        if current_protocol == symbol_short!("dex")
-            && env.storage().instance().has(&DataKey::DexPool)
-        {
-            let dex_pool: Address = env.storage().instance().get(&DataKey::DexPool).unwrap();
+        if let Some(pool) = dex_pool {
             let deployed_balance = DexPoolClient::get_balance(
                 &env,
-                &dex_pool,
+                &pool,
                 &usdc_token,
                 &env.current_contract_address(),
             );
@@ -5897,25 +5886,29 @@ impl NeuroWealthVault {
     /// Prevents dust attacks where floor division could result in 0 shares burned.
     #[inline]
     fn convert_to_shares_internal_ceil(env: &Env, assets: i128) -> i128 {
+        let total_shares = Self::get_total_shares_internal(env);
+        let total_assets = Self::get_total_assets_internal(env);
+        Self::convert_to_shares_internal_ceil_with_totals(assets, total_shares, total_assets)
+    }
+
+    /// Internal helper: convert assets (USDC) to shares using supplied totals.
+    /// Uses ceiling division - safe for withdrawals (user burns more shares, vault benefits).
+    #[inline]
+    fn convert_to_shares_internal_ceil_with_totals(
+        assets: i128,
+        total_shares: i128,
+        total_assets: i128,
+    ) -> i128 {
         if assets == 0 {
             return 0;
         }
 
-        let total_shares = Self::get_total_shares_internal(env);
-        let total_assets = Self::get_total_assets_internal(env);
-
         if total_shares == 0 || total_assets == 0 {
-            // Bootstrap: 1:1 mapping between assets and shares
-            // Ceiling of assets is just assets (assets >= 1)
             assets
         } else {
-            // Ceiling division: (a + b - 1) / b
-            // shares = ceil(assets * total_shares / total_assets)
             let product = assets
                 .checked_mul(total_shares)
                 .expect("vault: conversion mul overflow");
-            // total_assets >= 1 in this branch, so the subtraction cannot underflow;
-            // use checked ops throughout for a consistent, explicit failure mode.
             let numerator = product
                 .checked_add(
                     total_assets
@@ -5932,12 +5925,21 @@ impl NeuroWealthVault {
     /// Internal helper: convert shares to assets (USDC) using current totals.
     #[inline]
     fn convert_to_assets_internal(env: &Env, shares: i128) -> i128 {
+        let total_shares = Self::get_total_shares_internal(env);
+        let total_assets = Self::get_total_assets_internal(env);
+        Self::convert_to_assets_internal_with_totals(shares, total_shares, total_assets)
+    }
+
+    /// Internal helper: convert shares to assets (USDC) using supplied totals.
+    #[inline]
+    fn convert_to_assets_internal_with_totals(
+        shares: i128,
+        total_shares: i128,
+        total_assets: i128,
+    ) -> i128 {
         if shares == 0 {
             return 0;
         }
-
-        let total_shares = Self::get_total_shares_internal(env);
-        let total_assets = Self::get_total_assets_internal(env);
 
         if total_shares == 0 || total_assets == 0 {
             0
