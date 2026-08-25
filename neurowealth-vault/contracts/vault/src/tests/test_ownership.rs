@@ -149,6 +149,44 @@ fn test_cancel_ownership_non_owner_panics() {
 }
 
 // ──────────────────────────────────────────────
+// Pending owner cannot cancel transfer (Issue #573)
+// ──────────────────────────────────────────────
+
+#[test]
+#[should_panic(expected = "Only owner")]
+fn test_pending_owner_cannot_cancel_ownership_transfer() {
+    let mut contract = setup();
+
+    let ctx = get_context(accounts(0));
+    testing_env!(ctx.build());
+    contract.transfer_ownership(accounts(1));
+
+    assert_eq!(contract.pending_owner(), Some(accounts(1)));
+
+    // The pending owner (accounts(1)) tries to cancel — should panic
+    let ctx = get_context(accounts(1));
+    testing_env!(ctx.build());
+    contract.cancel_ownership_transfer();
+}
+
+#[test]
+#[should_panic(expected = "Only owner")]
+fn test_third_party_cannot_cancel_ownership_transfer() {
+    let mut contract = setup();
+
+    let ctx = get_context(accounts(0));
+    testing_env!(ctx.build());
+    contract.transfer_ownership(accounts(1));
+
+    assert_eq!(contract.pending_owner(), Some(accounts(1)));
+
+    // An uninvolved third party (accounts(2)) tries to cancel — should panic
+    let ctx = get_context(accounts(2));
+    testing_env!(ctx.build());
+    contract.cancel_ownership_transfer();
+}
+
+// ──────────────────────────────────────────────
 // Events emitted on transfer / accept / cancel
 // ──────────────────────────────────────────────
 
