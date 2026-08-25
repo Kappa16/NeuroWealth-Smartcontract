@@ -10,6 +10,7 @@ This changelog is tied to the vault contract `Version` storage value. Each relea
 
 ## [Unreleased]
 <!-- Add entries below. Format: `- Short description (Issue #N).` -->
+- Document `harvest()` in README, ARCHITECTURE, SECURITY, and the state machine; add dedicated idle/deployed asset breakdown tests (Issues #499, #498, #501).
 <!-- If this PR bumps get_version(), note the new Version value here. -->
 - `initialize` now rejects the zero address (the unspendable all-zero ed25519
   account) for `deployer`, `owner`, `agent`, and `usdc_token`, with dedicated

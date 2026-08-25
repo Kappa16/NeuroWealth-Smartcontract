@@ -229,6 +229,7 @@ The core Soroban vault contract handles all on-chain fund management.
 | `withdraw` | User (their own funds) | Withdraw USDC back to wallet |
 | `withdraw_all` | User (their own funds) | Withdraw all USDC by burning all shares |
 | `rebalance` | AI Agent only | Move funds between yield strategies (`protocol`, `expected_apy`, `min_out`; supported: `blend`, `dex`, `none`) |
+| `harvest` | AI Agent only | Withdraw accrued yield from `CurrentProtocol` and re-supply it with `min_out` slippage protection |
 | `set_blend_pool` | Owner only | Configure the Blend lending pool address |
 | `set_dex_pool` | Owner only | Configure the DEX liquidity pool address |
 | `get_balance` | Anyone | Read a user's current balance |

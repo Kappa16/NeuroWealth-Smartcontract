@@ -228,6 +228,10 @@ When the agent calls `rebalance(protocol="blend", ...)` the vault:
 
 On withdrawal, if the vault's idle balance is insufficient, it calls `blend_pool.submit()` to withdraw the required amount before transferring to the user.
 
+### Harvest Round Trip
+
+When the AI agent calls `harvest(min_out)`, the vault reads `CurrentProtocol`, withdraws accrued assets from that protocol, and immediately supplies the returned amount back into the same protocol. This compounds yield without changing user shares. If `CurrentProtocol` is `"none"`, harvest is rejected because there is no external position to compound. Successful harvests emit `HarvestEvent` with the active protocol and harvested amount, then update `LastRebalanceLedger` so the cooldown model remains shared with `rebalance()`.
+
 ### Historical: Phase 1 (1:1 accounting — deprecated)
 
 Prior to the ERC-4626 model, the vault used simple 1:1 balance accounting: 1 deposited USDC = 1 vault balance unit, with no share concept. This approach could not track proportional yield and has been fully replaced. The `Balance(Address)` key is retained only for legacy migration paths and is no longer the authoritative ownership record — `Shares(Address)` is.

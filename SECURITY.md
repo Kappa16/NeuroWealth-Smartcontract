@@ -109,6 +109,7 @@ Soroban persistent entries (such as each user's `Shares` record) accrue state re
 | withdraw | - | - | yes | - |
 | withdraw_all | - | - | yes | - |
 | rebalance | - | yes | - | - |
+| harvest | - | yes | - | - |
 | pause | yes | - | - | - |
 | emergency_pause | yes | - | - | - |
 | unpause | yes | - | - | - |
