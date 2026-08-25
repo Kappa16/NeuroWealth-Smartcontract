@@ -1655,7 +1655,7 @@ impl NeuroWealthVault {
             let (token, amount) = entries.get(i).unwrap();
             // Until multi-asset is enabled, require all entries to use USDC.
             if token != usdc_token {
-                panic!("batch_deposit: token {} is not supported; only USDC is accepted", token);
+                panic!("batch_deposit: token {:?} is not supported; only USDC is accepted", token);
             }
             Self::require_positive_amount(&env, amount);
             total_amount = total_amount
@@ -1742,17 +1742,14 @@ impl NeuroWealthVault {
                 .expect("batch_deposit: total shares overflow")),
         );
 
-        let total_assets = Self::get_total_assets_internal(&env);
         for i in 0..total_entries {
-            let (token, amount) = entries.get(i).unwrap();
+            let (_token, amount) = entries.get(i).unwrap();
             env.events().publish(
                 (TOPIC_DEPOSIT, user.clone()),
                 DepositEvent {
                     user: user.clone(),
-                    token,
                     amount,
                     shares: shares_to_mint,
-                    total_assets,
                 },
             );
         }
