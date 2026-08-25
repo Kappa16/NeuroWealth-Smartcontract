@@ -69,9 +69,7 @@ fn assets_from_shares(shares: i128, total_shares: i128, total_assets: i128) -> O
     if total_shares == 0 || total_assets == 0 {
         return Some(0);
     }
-    shares
-        .checked_mul(total_assets)
-        .map(|p| p / total_shares)
+    shares.checked_mul(total_assets).map(|p| p / total_shares)
 }
 
 // ---------------------------------------------------------------------------
@@ -397,7 +395,7 @@ proptest! {
 
         let shares_to_burn = shares_ceil(entitled_assets, new_total_shares, post_harvest_assets)
             .expect("overflow not possible at tested bounds");
-        
+
         let assets_returned = assets_from_shares(shares_to_burn, new_total_shares, post_harvest_assets)
             .expect("overflow not possible at tested bounds");
 

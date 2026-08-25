@@ -571,4 +571,3 @@ fn test_lowering_user_deposit_cap_below_current_deposit_blocks_new_deposits() {
         "User B deposit exceeding lowered cap must be blocked with VaultError::ExceedsUserDepositCap (#40)"
     );
 }
-

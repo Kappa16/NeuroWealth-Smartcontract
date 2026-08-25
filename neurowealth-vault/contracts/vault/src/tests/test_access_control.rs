@@ -123,13 +123,23 @@ fn test_update_agent_emits_event() {
     client.update_agent(&new_agent);
 
     let agent_events = find_events_by_topic(env.events().all(), &env, TOPIC_AGENT_UPDATED);
-    assert_eq!(agent_events.len(), 1, "Exactly one agent event should be emitted");
+    assert_eq!(
+        agent_events.len(),
+        1,
+        "Exactly one agent event should be emitted"
+    );
 
     let (_, _, data) = &agent_events[0];
-    let event = AgentUpdatedEvent::try_from_val(&env, data)
-        .expect("Should be a valid AgentUpdatedEvent");
-    assert_eq!(event.old_agent, old_agent, "old_agent should match previous agent");
-    assert_eq!(event.new_agent, new_agent, "new_agent should match updated agent");
+    let event =
+        AgentUpdatedEvent::try_from_val(&env, data).expect("Should be a valid AgentUpdatedEvent");
+    assert_eq!(
+        event.old_agent, old_agent,
+        "old_agent should match previous agent"
+    );
+    assert_eq!(
+        event.new_agent, new_agent,
+        "new_agent should match updated agent"
+    );
 }
 
 #[test]
@@ -562,7 +572,7 @@ fn test_pending_owner_cannot_cancel_ownership_transfer() {
     assert_eq!(client.get_pending_owner().unwrap(), pending_owner);
 
     // The pending owner tries to cancel — should fail with CallerIsNotOwner
-    let result = client.try_cancel_ownership_transfer(&pending_owner);
+    let result = client.try_cancel_ownership_transfer();
     assert!(
         result.is_err(),
         "pending owner should not be able to cancel ownership transfer"
@@ -589,7 +599,7 @@ fn test_third_party_cannot_cancel_ownership_transfer() {
 
     // An uninvolved third party tries to cancel — should fail with CallerIsNotOwner
     let third_party = Address::generate(&env);
-    let result = client.try_cancel_ownership_transfer(&third_party);
+    let result = client.try_cancel_ownership_transfer();
     assert!(
         result.is_err(),
         "third party should not be able to cancel ownership transfer"

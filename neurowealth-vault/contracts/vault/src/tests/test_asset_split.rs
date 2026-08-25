@@ -293,7 +293,10 @@ fn test_idle_plus_deployed_equals_total_across_rebalance_cycle() {
         total,
         "idle + deployed must equal total after deposit"
     );
-    assert_eq!(idle, deposit_amount, "all funds should be idle after deposit");
+    assert_eq!(
+        idle, deposit_amount,
+        "all funds should be idle after deposit"
+    );
     assert_eq!(deployed, 0, "nothing should be deployed after deposit");
 
     // STEP 2: Rebalance to Blend
@@ -329,7 +332,10 @@ fn test_idle_plus_deployed_equals_total_across_rebalance_cycle() {
         deposit_amount - withdraw_amount,
         "remaining funds should be idle after partial withdraw"
     );
-    assert_eq!(deployed, 0, "nothing should be deployed after partial withdraw");
+    assert_eq!(
+        deployed, 0,
+        "nothing should be deployed after partial withdraw"
+    );
 
     // STEP 4: Rebalance to DEX (different protocol)
     client.rebalance(&symbol_short!("dex"), &800_i128, &0_i128);

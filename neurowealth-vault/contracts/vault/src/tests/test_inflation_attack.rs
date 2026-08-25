@@ -211,7 +211,11 @@ fn test_inflation_attack_profit_always_below_gas_cost_across_timings() {
         ("before_any_victim", 1_000_000_i128, 10_000_000_000_i128),
         ("after_first_victim", 1_000_000_i128, 10_000_000_000_i128),
         ("interleaved_multiple", 1_000_000_i128, 10_000_000_000_i128),
-        ("large_donation_small_seed", 100_000_i128, 50_000_000_000_i128),
+        (
+            "large_donation_small_seed",
+            100_000_i128,
+            50_000_000_000_i128,
+        ),
     ];
 
     for (scenario, seed, donation) in timing_scenarios {

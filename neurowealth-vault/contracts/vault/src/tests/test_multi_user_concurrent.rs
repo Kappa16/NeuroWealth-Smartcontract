@@ -49,9 +49,7 @@ fn assert_vault_invariants(client: &NeuroWealthVaultClient, users: &[Address]) {
     for user in users {
         let bal = client.get_balance(user);
         assert!(bal >= 0, "user balance cannot be negative: got {}", bal);
-        sum_balances = sum_balances
-            .checked_add(bal)
-            .expect("balance sum overflow");
+        sum_balances = sum_balances.checked_add(bal).expect("balance sum overflow");
     }
 
     // The total of all user get_balance() should be <= total_assets.
@@ -126,12 +124,26 @@ fn test_multi_user_concurrent_deposit_withdraw() {
         // Verify user-level consistency: shares and balance
         let shares = client.get_shares(user);
         let balance = client.get_balance(user);
-        assert!(shares >= 0, "negative shares for user {} at step {}", user_idx, step);
-        assert!(balance >= 0, "negative balance for user {} at step {}", user_idx, step);
+        assert!(
+            shares >= 0,
+            "negative shares for user {} at step {}",
+            user_idx,
+            step
+        );
+        assert!(
+            balance >= 0,
+            "negative balance for user {} at step {}",
+            user_idx,
+            step
+        );
         // If user has shares, they should have a balance (or be zero after withdraw-all)
         // If user has no shares, balance must be 0
         if shares == 0 {
-            assert_eq!(balance, 0, "user {} has zero shares but non-zero balance {} at step {}", user_idx, balance, step);
+            assert_eq!(
+                balance, 0,
+                "user {} has zero shares but non-zero balance {} at step {}",
+                user_idx, balance, step
+            );
         }
     }
 

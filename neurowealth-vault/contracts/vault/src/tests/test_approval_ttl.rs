@@ -260,7 +260,10 @@ fn test_set_blend_approval_ttl_zero_with_deployed_funds_allows_withdrawal() {
 
     // Verify funds are deployed (vault has less idle USDC)
     let vault_idle_balance = token_client.balance(&contract_id);
-    assert!(vault_idle_balance < 10_000_000_i128, "funds should be deployed to Blend");
+    assert!(
+        vault_idle_balance < 10_000_000_i128,
+        "funds should be deployed to Blend"
+    );
 
     // Set Blend approval TTL to 0 while funds are deployed
     client.set_blend_approval_ttl(&owner, &0_u32);
@@ -270,9 +273,9 @@ fn test_set_blend_approval_ttl_zero_with_deployed_funds_allows_withdrawal() {
     // The vault should handle the expired approval gracefully by refreshing approvals
     let withdraw_amount = 1_000_000_i128;
     let user_balance_before = token_client.balance(&user);
-    
+
     client.withdraw(&user, &withdraw_amount);
-    
+
     let user_balance_after = token_client.balance(&user);
     assert_eq!(
         user_balance_after - user_balance_before,

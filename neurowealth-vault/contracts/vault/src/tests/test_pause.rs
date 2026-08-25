@@ -23,7 +23,7 @@ extern crate std;
 
 use super::utils::*;
 use crate::{EmergencyPausedEvent, VaultPausedEvent, TOPIC_EMERGENCY_PAUSED, TOPIC_PAUSED};
-use soroban_sdk::{testutils::Address as _, Address, BytesN, Env, TryFromVal};
+use soroban_sdk::{testutils::{Address as _, Ledger as _}, Address, BytesN, Env, TryFromVal};
 
 // ============================================================================
 // ── Section 1: Functional pause tests (original) ─────────────────────────────
@@ -175,11 +175,15 @@ fn test_pause_emits_event() {
     client.pause(&owner);
 
     let pause_events = find_events_by_topic(env.events().all(), &env, TOPIC_PAUSED);
-    assert_eq!(pause_events.len(), 1, "Exactly one paused event should be emitted");
+    assert_eq!(
+        pause_events.len(),
+        1,
+        "Exactly one paused event should be emitted"
+    );
 
     let (_, _, data) = &pause_events[0];
-    let event = VaultPausedEvent::try_from_val(&env, data)
-        .expect("Should be a valid VaultPausedEvent");
+    let event =
+        VaultPausedEvent::try_from_val(&env, data).expect("Should be a valid VaultPausedEvent");
     assert_eq!(event.owner, owner, "Event owner should match caller");
 }
 
@@ -195,7 +199,8 @@ fn test_emergency_pause_emits_event() {
 
     let emergency_events = find_events_by_topic(env.events().all(), &env, TOPIC_EMERGENCY_PAUSED);
     assert_eq!(
-        emergency_events.len(), 1,
+        emergency_events.len(),
+        1,
         "Exactly one emergency paused event should be emitted"
     );
 
@@ -301,8 +306,7 @@ fn test_auto_pause_emits_different_event_than_owner_pause() {
     mint_and_deposit(&env, &client2, &usdc_token2, &user, 10_000_000_i128);
 
     // Record events before triggering the circuit breaker.
-    let emerg_before =
-        find_events_by_topic(env.events().all(), &env, TOPIC_EMERGENCY_PAUSED).len();
+    let emerg_before = find_events_by_topic(env.events().all(), &env, TOPIC_EMERGENCY_PAUSED).len();
 
     // Three consecutive failures trip the default threshold (3).
     client2.rebalance(&soroban_sdk::symbol_short!("blend"), &500_i128, &0_i128);
@@ -311,8 +315,7 @@ fn test_auto_pause_emits_different_event_than_owner_pause() {
     assert!(client2.is_paused(), "circuit breaker must pause the vault");
 
     // Exactly one new EmergencyPausedEvent must have been emitted.
-    let emerg_events =
-        find_events_by_topic(env.events().all(), &env, TOPIC_EMERGENCY_PAUSED);
+    let emerg_events = find_events_by_topic(env.events().all(), &env, TOPIC_EMERGENCY_PAUSED);
     assert_eq!(
         emerg_events.len(),
         emerg_before + 1,
@@ -324,8 +327,7 @@ fn test_auto_pause_emits_different_event_than_owner_pause() {
     assert_eq!(event.owner, owner2);
 
     // Ensure no VaultPausedEvent was emitted by the circuit breaker.
-    let pause_events_after_circuit =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PAUSED);
+    let pause_events_after_circuit = find_events_by_topic(env.events().all(), &env, TOPIC_PAUSED);
     // The owner2 vault has no pause events (we only called rebalance, not pause).
     assert_eq!(
         pause_events_after_circuit.len(),
@@ -406,7 +408,8 @@ fn test_emergency_pause_blocks_operations_and_emits_event() {
     // 3. Verifies the emitted event topic is "emerg"
     let emergency_events = find_events_by_topic(env.events().all(), &env, TOPIC_EMERGENCY_PAUSED);
     assert_eq!(
-        emergency_events.len(), 1,
+        emergency_events.len(),
+        1,
         "Exactly one emergency paused event should be emitted"
     );
     assert_eq!(
@@ -432,7 +435,8 @@ fn test_emergency_pause_blocks_operations_and_emits_event() {
     );
 
     // 6. Asserts a rebalance attempt panics with VaultError::Paused (#35)
-    let rebalance_res = client.try_rebalance(&soroban_sdk::symbol_short!("blend"), &500_i128, &0_i128);
+    let rebalance_res =
+        client.try_rebalance(&soroban_sdk::symbol_short!("blend"), &500_i128, &0_i128);
     assert_eq!(
         rebalance_res,
         Err(Ok(soroban_sdk::Error::from_contract_error(35))),
@@ -466,8 +470,8 @@ fn assert_not_paused_error<T: core::fmt::Debug, E: core::fmt::Debug>(
     // We check by comparing the debug representation to avoid naming
     // InvokeError which is not re-exported in the test namespace.
     let paused = soroban_sdk::Error::from_contract_error(PAUSED_ERR);
-    let debug_str = format!("{:?}", result);
-    let paused_str = format!("{:?}", paused);
+    let debug_str = std::format!("{:?}", result);
+    let paused_str = std::format!("{:?}", paused);
     assert!(
         !debug_str.contains(&paused_str) || result.is_ok(),
         "{} must NOT return VaultError::Paused (#35) while paused — got: {:?}",
@@ -624,9 +628,7 @@ fn pause_matrix_execute_upgrade_blocked() {
     client.schedule_upgrade(&owner, &fake_hash);
 
     // Advance ledger past the timelock.
-    env.ledger().with_mut(|li| {
-        li.sequence_number += 17_281;
-    });
+    env.ledger().set_sequence_number(env.ledger().sequence() + 17_281);
 
     client.pause(&owner);
     assert!(client.is_paused());

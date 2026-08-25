@@ -87,7 +87,10 @@ fn test_agent_cannot_pause() {
 
     let result = client.try_pause(&agent);
 
-    assert!(result.is_err(), "compromised agent must not be able to pause");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to pause"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -101,7 +104,10 @@ fn test_agent_cannot_unpause() {
 
     let result = client.try_unpause(&agent);
 
-    assert!(result.is_err(), "compromised agent must not be able to unpause");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to unpause"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -114,7 +120,10 @@ fn test_agent_cannot_emergency_pause() {
 
     let result = client.try_emergency_pause(&agent);
 
-    assert!(result.is_err(), "compromised agent must not be able to emergency-pause");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to emergency-pause"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -128,7 +137,10 @@ fn test_agent_cannot_set_blend_pool() {
 
     let result = client.try_set_blend_pool(&agent, &fake_pool);
 
-    assert!(result.is_err(), "compromised agent must not be able to set the Blend pool");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to set the Blend pool"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -142,7 +154,10 @@ fn test_agent_cannot_set_dex_pool() {
 
     let result = client.try_set_dex_pool(&agent, &fake_pool);
 
-    assert!(result.is_err(), "compromised agent must not be able to set the DEX pool");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to set the DEX pool"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -155,7 +170,10 @@ fn test_agent_cannot_set_blend_approval_ttl() {
 
     let result = client.try_set_blend_approval_ttl(&agent, &100_u32);
 
-    assert!(result.is_err(), "compromised agent must not be able to set the Blend approval TTL");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to set the Blend approval TTL"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -169,7 +187,10 @@ fn test_agent_cannot_schedule_upgrade() {
 
     let result = client.try_schedule_upgrade(&agent, &fake_hash);
 
-    assert!(result.is_err(), "compromised agent must not be able to schedule an upgrade");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to schedule an upgrade"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -182,7 +203,10 @@ fn test_agent_cannot_execute_upgrade() {
 
     let result = client.try_execute_upgrade(&agent);
 
-    assert!(result.is_err(), "compromised agent must not be able to execute an upgrade");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to execute an upgrade"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -195,7 +219,10 @@ fn test_agent_cannot_cancel_upgrade() {
 
     let result = client.try_cancel_upgrade(&agent);
 
-    assert!(result.is_err(), "compromised agent must not be able to cancel an upgrade");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to cancel an upgrade"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -209,7 +236,10 @@ fn test_agent_cannot_accept_ownership() {
     // No transfer was ever initiated toward the agent — accept must reject.
     let result = client.try_accept_ownership(&agent);
 
-    assert!(result.is_err(), "compromised agent must not be able to accept ownership");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to accept ownership"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -226,7 +256,10 @@ fn test_agent_cannot_decrease_total_assets_without_owner_cosign() {
     // reject this, exercised precisely under scoped auth in Group 2).
     let result = client.try_update_total_assets(&agent, &1_i128, &true, &1000_u32);
 
-    assert!(result.is_err(), "agent alone must not be able to decrease total_assets");
+    assert!(
+        result.is_err(),
+        "agent alone must not be able to decrease total_assets"
+    );
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -241,7 +274,10 @@ fn test_owner_cannot_impersonate_agent_in_update_total_assets() {
 
     let result = client.try_update_total_assets(&owner, &10_000_000_i128, &false, &0_u32);
 
-    assert!(result.is_err(), "owner must not be able to impersonate the agent");
+    assert!(
+        result.is_err(),
+        "owner must not be able to impersonate the agent"
+    );
     let after = snapshot_vault_state(&client, &[owner.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
 }
@@ -260,10 +296,19 @@ fn test_agent_cannot_set_tvl_cap() {
     let before = snapshot_vault_state(&client, &[agent.clone()]);
     let cap = 50_000_000_000_i128;
 
-    mock_agent_only_auth(&env, &contract_id, &agent, "set_tvl_cap", (cap,).into_val(&env));
+    mock_agent_only_auth(
+        &env,
+        &contract_id,
+        &agent,
+        "set_tvl_cap",
+        (cap,).into_val(&env),
+    );
     let result = client.try_set_tvl_cap(&cap);
 
-    assert!(result.is_err(), "compromised agent must not be able to set the TVL cap");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to set the TVL cap"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -276,10 +321,19 @@ fn test_agent_cannot_set_user_deposit_cap() {
     let before = snapshot_vault_state(&client, &[agent.clone()]);
     let cap = 25_000_000_000_i128;
 
-    mock_agent_only_auth(&env, &contract_id, &agent, "set_user_deposit_cap", (cap,).into_val(&env));
+    mock_agent_only_auth(
+        &env,
+        &contract_id,
+        &agent,
+        "set_user_deposit_cap",
+        (cap,).into_val(&env),
+    );
     let result = client.try_set_user_deposit_cap(&cap);
 
-    assert!(result.is_err(), "compromised agent must not be able to set the per-user deposit cap");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to set the per-user deposit cap"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -302,7 +356,10 @@ fn test_agent_cannot_set_caps() {
     );
     let result = client.try_set_caps(&user_cap, &tvl_cap);
 
-    assert!(result.is_err(), "compromised agent must not be able to set caps");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to set caps"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -316,10 +373,19 @@ fn test_agent_cannot_set_limits() {
     let min = 1_000_000_i128;
     let max = 50_000_000_000_i128;
 
-    mock_agent_only_auth(&env, &contract_id, &agent, "set_limits", (min, max).into_val(&env));
+    mock_agent_only_auth(
+        &env,
+        &contract_id,
+        &agent,
+        "set_limits",
+        (min, max).into_val(&env),
+    );
     let result = client.try_set_limits(&min, &max);
 
-    assert!(result.is_err(), "compromised agent must not be able to set limits");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to set limits"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -342,7 +408,10 @@ fn test_agent_cannot_set_deposit_limits() {
     );
     let result = client.try_set_deposit_limits(&min, &max);
 
-    assert!(result.is_err(), "compromised agent must not be able to set deposit limits");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to set deposit limits"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -364,7 +433,10 @@ fn test_agent_cannot_set_rebalance_cooldown() {
     );
     let result = client.try_set_rebalance_cooldown(&interval);
 
-    assert!(result.is_err(), "compromised agent must not be able to set the rebalance cooldown");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to set the rebalance cooldown"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -402,10 +474,19 @@ fn test_agent_cannot_set_approval_ttl() {
     let before = snapshot_vault_state(&client, &[agent.clone()]);
     let ttl = 2_000_u32;
 
-    mock_agent_only_auth(&env, &contract_id, &agent, "set_approval_ttl", (ttl,).into_val(&env));
+    mock_agent_only_auth(
+        &env,
+        &contract_id,
+        &agent,
+        "set_approval_ttl",
+        (ttl,).into_val(&env),
+    );
     let result = client.try_set_approval_ttl(&ttl);
 
-    assert!(result.is_err(), "compromised agent must not be able to set the approval TTL");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to set the approval TTL"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -427,7 +508,10 @@ fn test_agent_cannot_update_agent() {
     );
     let result = client.try_update_agent(&new_agent);
 
-    assert!(result.is_err(), "compromised agent must not be able to rotate the agent");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to rotate the agent"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -439,10 +523,19 @@ fn test_agent_cannot_confirm_agent_update() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
     let before = snapshot_vault_state(&client, &[agent.clone()]);
 
-    mock_agent_only_auth(&env, &contract_id, &agent, "confirm_agent_update", ().into_val(&env));
+    mock_agent_only_auth(
+        &env,
+        &contract_id,
+        &agent,
+        "confirm_agent_update",
+        ().into_val(&env),
+    );
     let result = client.try_confirm_agent_update();
 
-    assert!(result.is_err(), "compromised agent must not be able to confirm an agent update");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to confirm an agent update"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -454,10 +547,19 @@ fn test_agent_cannot_cancel_agent_update() {
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
     let before = snapshot_vault_state(&client, &[agent.clone()]);
 
-    mock_agent_only_auth(&env, &contract_id, &agent, "cancel_agent_update", ().into_val(&env));
+    mock_agent_only_auth(
+        &env,
+        &contract_id,
+        &agent,
+        "cancel_agent_update",
+        ().into_val(&env),
+    );
     let result = client.try_cancel_agent_update();
 
-    assert!(result.is_err(), "compromised agent must not be able to cancel an agent update");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to cancel an agent update"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -479,7 +581,10 @@ fn test_agent_cannot_transfer_ownership() {
     );
     let result = client.try_transfer_ownership(&new_owner);
 
-    assert!(result.is_err(), "compromised agent must not be able to initiate an ownership transfer");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to initiate an ownership transfer"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -524,7 +629,10 @@ fn test_agent_cannot_emergency_harvest() {
     );
     let result = client.try_emergency_harvest(&0_i128);
 
-    assert!(result.is_err(), "compromised agent must not be able to call emergency_harvest");
+    assert!(
+        result.is_err(),
+        "compromised agent must not be able to call emergency_harvest"
+    );
     env.mock_all_auths();
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
@@ -547,11 +655,17 @@ fn test_agent_rebalance_mutates_only_allowlisted_fields() {
     let changed = diff_vault_state(&before, &after);
     for field in &changed {
         assert!(
-            matches!(*field, "current_protocol" | "last_rebalance_ledger" | "consecutive_failures" | "paused"),
+            matches!(
+                *field,
+                "current_protocol" | "last_rebalance_ledger" | "consecutive_failures" | "paused"
+            ),
             "rebalance mutated disallowed field: {field}"
         );
     }
-    assert!(diff_watched_addresses(&before, &after).is_empty(), "rebalance must not touch user balances");
+    assert!(
+        diff_watched_addresses(&before, &after).is_empty(),
+        "rebalance must not touch user balances"
+    );
 }
 
 #[test]
@@ -570,7 +684,10 @@ fn test_agent_can_increase_total_assets_within_backing() {
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     let changed = diff_vault_state(&before, &after);
     for field in &changed {
-        assert!(*field == "total_assets", "update_total_assets mutated disallowed field: {field}");
+        assert!(
+            *field == "total_assets",
+            "update_total_assets mutated disallowed field: {field}"
+        );
     }
     assert_eq!(after.total_assets, new_total);
     assert!(diff_watched_addresses(&before, &after).is_empty());
@@ -621,7 +738,11 @@ fn test_agent_self_withdraw_mutates_only_allowlisted_fields() {
     let touched = diff_watched_addresses(&before, &after);
     assert_eq!(touched.len(), 1);
     assert_eq!(touched[0], agent);
-    assert_eq!(client.get_shares(&agent), 0, "agent shares should be fully withdrawn");
+    assert_eq!(
+        client.get_shares(&agent),
+        0,
+        "agent shares should be fully withdrawn"
+    );
 }
 
 #[test]
@@ -634,7 +755,10 @@ fn test_agent_set_own_strategy_does_not_touch_singleton_state() {
 
     let after = snapshot_vault_state(&client, &[agent.clone()]);
     assert!(diff_vault_state(&before, &after).is_empty());
-    assert_eq!(client.get_user_strategy(&agent), Symbol::new(&env, "growth"));
+    assert_eq!(
+        client.get_user_strategy(&agent),
+        Symbol::new(&env, "growth")
+    );
 }
 
 // ============================================================================
@@ -692,5 +816,8 @@ fn test_agent_invoking_every_getter_causes_no_mutation() {
     let _ = client.touch_user_ttl(&agent);
 
     let after = snapshot_vault_state(&client, &[agent.clone()]);
-    assert_eq!(before, after, "read-only entrypoints must never mutate vault state");
+    assert_eq!(
+        before, after,
+        "read-only entrypoints must never mutate vault state"
+    );
 }
