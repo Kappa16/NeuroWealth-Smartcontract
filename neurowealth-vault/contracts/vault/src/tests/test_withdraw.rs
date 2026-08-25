@@ -7,7 +7,9 @@ use soroban_sdk::{testutils::Address as _, Address, Env, TryFromVal};
 /// Reads the raw `Shares(user)` value persisted in storage.
 fn stored_shares(env: &Env, contract_id: &Address, user: &Address) -> Option<i128> {
     env.as_contract(contract_id, || {
-        env.storage().persistent().get(&DataKey::Shares(user.clone()))
+        env.storage()
+            .persistent()
+            .get(&DataKey::Shares(user.clone()))
     })
 }
 
@@ -238,11 +240,30 @@ fn test_withdraw_all_detailed_invariants() {
 
     let withdrawn = client.withdraw_all(&user);
 
-    assert_eq!(client.get_shares(&user), 0, "After withdraw_all, user shares are exactly 0");
-    assert_eq!(client.get_balance(&user), 0, "After withdraw_all, user balance is exactly 0");
-    assert_eq!(withdrawn, expected_usdc, "USDC returned equals convert_to_assets(original_shares)");
-    assert_eq!(client.get_total_shares(), original_total_shares - original_shares, "total_shares decreases by exactly original shares");
-    assert_eq!(client.get_total_assets(), original_total_assets - withdrawn, "total_assets decreases by exactly USDC returned");
+    assert_eq!(
+        client.get_shares(&user),
+        0,
+        "After withdraw_all, user shares are exactly 0"
+    );
+    assert_eq!(
+        client.get_balance(&user),
+        0,
+        "After withdraw_all, user balance is exactly 0"
+    );
+    assert_eq!(
+        withdrawn, expected_usdc,
+        "USDC returned equals convert_to_assets(original_shares)"
+    );
+    assert_eq!(
+        client.get_total_shares(),
+        original_total_shares - original_shares,
+        "total_shares decreases by exactly original shares"
+    );
+    assert_eq!(
+        client.get_total_assets(),
+        original_total_assets - withdrawn,
+        "total_assets decreases by exactly USDC returned"
+    );
 }
 
 #[test]
@@ -261,11 +282,17 @@ fn test_withdraw_emits_event() {
     client.withdraw(&user, &withdraw_amount);
 
     let withdraw_events = find_events_by_topic(env.events().all(), &env, TOPIC_WITHDRAW);
-    assert_eq!(withdraw_events.len(), 1, "Exactly one withdraw event should be emitted");
+    assert_eq!(
+        withdraw_events.len(),
+        1,
+        "Exactly one withdraw event should be emitted"
+    );
 
     let (_, _, data) = &withdraw_events[0];
-    let event = WithdrawEvent::try_from_val(&env, data)
-        .expect("Should be a valid WithdrawEvent");
+    let event = WithdrawEvent::try_from_val(&env, data).expect("Should be a valid WithdrawEvent");
     assert_eq!(event.user, user, "Event user should match withdrawer");
-    assert_eq!(event.amount, withdraw_amount, "Event amount should match withdrawal");
+    assert_eq!(
+        event.amount, withdraw_amount,
+        "Event amount should match withdrawal"
+    );
 }

@@ -18,12 +18,12 @@ use crate::{
     DepositLimitsUpdatedEvent, DexPoolConfiguredEvent, DexSupplyEvent, DexWithdrawEvent,
     EmergencyPausedEvent, OwnershipTransferCancelledEvent, OwnershipTransferInitiatedEvent,
     OwnershipTransferredEvent, RebalanceEvent, TvlCapUpdatedEvent, UserDepositCapUpdatedEvent,
-    VaultInitializedEvent, VaultPausedEvent, VaultUnpausedEvent, WithdrawEvent, TOPIC_AGENT_UPDATED,
-    TOPIC_ASSETS_UPDATED, TOPIC_CAPS_UPDATED, TOPIC_DEPOSIT, TOPIC_DEPOSIT_LIMITS_UPDATED,
-    TOPIC_DEX_POOL_CONFIGURED, TOPIC_DEX_SUPPLY, TOPIC_DEX_WITHDRAW, TOPIC_EMERGENCY_PAUSED,
-    TOPIC_INIT, TOPIC_OWNERSHIP_CANCELLED, TOPIC_OWNERSHIP_INITIATED, TOPIC_OWNERSHIP_TRANSFERRED,
-    TOPIC_PAUSED, TOPIC_REBALANCE, TOPIC_TVL_CAP_UPDATED, TOPIC_UNPAUSED, TOPIC_USER_CAP_UPDATED,
-    TOPIC_WITHDRAW,
+    VaultInitializedEvent, VaultPausedEvent, VaultUnpausedEvent, WithdrawEvent,
+    TOPIC_AGENT_UPDATED, TOPIC_ASSETS_UPDATED, TOPIC_CAPS_UPDATED, TOPIC_DEPOSIT,
+    TOPIC_DEPOSIT_LIMITS_UPDATED, TOPIC_DEX_POOL_CONFIGURED, TOPIC_DEX_SUPPLY, TOPIC_DEX_WITHDRAW,
+    TOPIC_EMERGENCY_PAUSED, TOPIC_INIT, TOPIC_OWNERSHIP_CANCELLED, TOPIC_OWNERSHIP_INITIATED,
+    TOPIC_OWNERSHIP_TRANSFERRED, TOPIC_PAUSED, TOPIC_REBALANCE, TOPIC_TVL_CAP_UPDATED,
+    TOPIC_UNPAUSED, TOPIC_USER_CAP_UPDATED, TOPIC_WITHDRAW,
 };
 use soroban_sdk::{
     symbol_short, testutils::Address as _, testutils::Ledger, Address, Env, TryFromVal,
@@ -55,7 +55,11 @@ fn snapshot_vault_initialized_event_all_fields() {
     let (_contract_id, agent, owner, usdc_token) = setup_vault_with_token(&env);
 
     let events = find_events_by_topic(env.events().all(), &env, TOPIC_INIT);
-    assert_eq!(events.len(), 1, "exactly one VaultInitializedEvent expected");
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one VaultInitializedEvent expected"
+    );
 
     let (_, _, data) = &events[0];
     let event = VaultInitializedEvent::try_from_val(&env, data)
@@ -65,7 +69,12 @@ fn snapshot_vault_initialized_event_all_fields() {
     snap!(event, agent, agent, "VaultInitializedEvent");
     snap!(event, usdc_token, usdc_token, "VaultInitializedEvent");
     // Default TVL cap set in initialize()
-    snap!(event, tvl_cap, 100_000_000_000_i128, "VaultInitializedEvent");
+    snap!(
+        event,
+        tvl_cap,
+        100_000_000_000_i128,
+        "VaultInitializedEvent"
+    );
 }
 
 // ── DepositEvent ──────────────────────────────────────────────────────────────
@@ -367,7 +376,11 @@ fn snapshot_user_deposit_cap_updated_event_all_fields() {
     client.set_user_deposit_cap(&new_cap);
 
     let events = find_events_by_topic(env.events().all(), &env, TOPIC_USER_CAP_UPDATED);
-    assert_eq!(events.len(), 1, "exactly one UserDepositCapUpdatedEvent expected");
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one UserDepositCapUpdatedEvent expected"
+    );
 
     let (_, _, data) = &events[0];
     let event = UserDepositCapUpdatedEvent::try_from_val(&env, data)
@@ -425,7 +438,11 @@ fn snapshot_deposit_limits_updated_event_all_fields() {
     client.set_deposit_limits(&new_min, &new_max);
 
     let events = find_events_by_topic(env.events().all(), &env, TOPIC_DEPOSIT_LIMITS_UPDATED);
-    assert_eq!(events.len(), 1, "exactly one DepositLimitsUpdatedEvent expected");
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one DepositLimitsUpdatedEvent expected"
+    );
 
     let (_, _, data) = &events[0];
     let event = DepositLimitsUpdatedEvent::try_from_val(&env, data)
@@ -504,14 +521,28 @@ fn snapshot_ownership_transfer_initiated_event_all_fields() {
     client.transfer_ownership(&pending_owner);
 
     let events = find_events_by_topic(env.events().all(), &env, TOPIC_OWNERSHIP_INITIATED);
-    assert_eq!(events.len(), 1, "exactly one OwnershipTransferInitiatedEvent expected");
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one OwnershipTransferInitiatedEvent expected"
+    );
 
     let (_, _, data) = &events[0];
     let event = OwnershipTransferInitiatedEvent::try_from_val(&env, data)
         .expect("OwnershipTransferInitiatedEvent: try_from_val failed — schema may have drifted");
 
-    snap!(event, current_owner, current_owner, "OwnershipTransferInitiatedEvent");
-    snap!(event, pending_owner, pending_owner, "OwnershipTransferInitiatedEvent");
+    snap!(
+        event,
+        current_owner,
+        current_owner,
+        "OwnershipTransferInitiatedEvent"
+    );
+    snap!(
+        event,
+        pending_owner,
+        pending_owner,
+        "OwnershipTransferInitiatedEvent"
+    );
 }
 
 // ── OwnershipTransferredEvent ─────────────────────────────────────────────────
@@ -528,7 +559,11 @@ fn snapshot_ownership_transferred_event_all_fields() {
     client.accept_ownership(&new_owner);
 
     let events = find_events_by_topic(env.events().all(), &env, TOPIC_OWNERSHIP_TRANSFERRED);
-    assert_eq!(events.len(), 1, "exactly one OwnershipTransferredEvent expected");
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one OwnershipTransferredEvent expected"
+    );
 
     let (_, _, data) = &events[0];
     let event = OwnershipTransferredEvent::try_from_val(&env, data)
@@ -552,14 +587,23 @@ fn snapshot_ownership_transfer_cancelled_event_all_fields() {
     client.cancel_ownership_transfer();
 
     let events = find_events_by_topic(env.events().all(), &env, TOPIC_OWNERSHIP_CANCELLED);
-    assert_eq!(events.len(), 1, "exactly one OwnershipTransferCancelledEvent expected");
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one OwnershipTransferCancelledEvent expected"
+    );
 
     let (_, _, data) = &events[0];
     let event = OwnershipTransferCancelledEvent::try_from_val(&env, data)
         .expect("OwnershipTransferCancelledEvent: try_from_val failed — schema may have drifted");
 
     snap!(event, owner, owner, "OwnershipTransferCancelledEvent");
-    snap!(event, cancelled_pending, pending_owner, "OwnershipTransferCancelledEvent");
+    snap!(
+        event,
+        cancelled_pending,
+        pending_owner,
+        "OwnershipTransferCancelledEvent"
+    );
 }
 
 // ── DexSupplyEvent (#340) ─────────────────────────────────────────────────────
@@ -632,14 +676,17 @@ fn snapshot_dex_pool_configured_event_all_fields() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, _agent, owner, _usdc_token, dex_pool) =
-        setup_vault_with_token_and_dex(&env);
+    let (contract_id, _agent, owner, _usdc_token, dex_pool) = setup_vault_with_token_and_dex(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     client.set_dex_pool(&owner, &dex_pool);
 
     let events = find_events_by_topic(env.events().all(), &env, TOPIC_DEX_POOL_CONFIGURED);
-    assert_eq!(events.len(), 1, "exactly one DexPoolConfiguredEvent expected");
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one DexPoolConfiguredEvent expected"
+    );
 
     let (_, _, data) = &events[0];
     let event = DexPoolConfiguredEvent::try_from_val(&env, data)

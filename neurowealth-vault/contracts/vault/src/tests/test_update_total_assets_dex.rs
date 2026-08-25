@@ -92,8 +92,7 @@ fn test_update_total_assets_dex_yield_succeeds() {
     let deposit = 20_000_000_i128;
     let yield_amount = 2_000_000_i128; // 10% yield
 
-    let (_, agent, usdc_token, dex_pool, client, token_client) =
-        setup_all_in_dex(&env, deposit);
+    let (_, agent, usdc_token, dex_pool, client, token_client) = setup_all_in_dex(&env, deposit);
 
     // Simulate DEX accruing yield by minting directly to pool
     token_client.mint(&dex_pool, &yield_amount);
@@ -117,8 +116,7 @@ fn test_update_total_assets_partial_dex_deployment_succeeds() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, agent, owner, usdc_token, dex_pool) =
-        setup_vault_with_token_and_dex(&env);
+    let (contract_id, agent, owner, usdc_token, dex_pool) = setup_vault_with_token_and_dex(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
     let token_client = TestTokenClient::new(&env, &usdc_token);
     let dex_client = MockDexPoolClient::new(&env, &dex_pool);
@@ -163,8 +161,7 @@ fn test_update_total_assets_partial_dex_plus_yield_succeeds() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, agent, owner, usdc_token, dex_pool) =
-        setup_vault_with_token_and_dex(&env);
+    let (contract_id, agent, owner, usdc_token, dex_pool) = setup_vault_with_token_and_dex(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
     let token_client = TestTokenClient::new(&env, &usdc_token);
     let dex_client = MockDexPoolClient::new(&env, &dex_pool);
@@ -216,8 +213,7 @@ fn test_update_total_assets_rejects_inflation_beyond_partial_dex_deployment() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, agent, owner, usdc_token, dex_pool) =
-        setup_vault_with_token_and_dex(&env);
+    let (contract_id, agent, owner, usdc_token, dex_pool) = setup_vault_with_token_and_dex(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
     let token_client = TestTokenClient::new(&env, &usdc_token);
     let dex_client = MockDexPoolClient::new(&env, &dex_pool);
