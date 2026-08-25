@@ -2,49 +2,155 @@
 
 This document describes the security architecture, trust model, and threat model for the NeuroWealth Vault contract.
 
-## Trust Model
+## Threat Model & Trust Boundaries (Issue #563)
 
-The NeuroWealth Vault implements a partitioned trust model with three distinct roles:
+The `NeuroWealthVault` smart contract operates in a multi-actor ecosystem involving privileged governance keys, automated off-chain execution services, end users, external DeFi protocols, and token issuers. System security depends on defining explicit trust boundaries and technical constraints around each actor.
 
-### Owner
+### Trust Boundary Architecture Diagram
 
-The contract owner has the following permissions:
-- **Pause/Unpause**: Can halt all deposits and withdrawals during emergencies
-- **Set TVL Cap**: Can limit total deposits to manage risk exposure
-- **Set User Deposit Cap**: Can limit per-user exposure
-- **Update Agent**: Can change the authorized AI agent address
-- **Upgrade Contract**: Can upgrade contract code (Phase 2)
+```mermaid
+graph TD
+    subgraph OwnerZone["Owner Trust Zone (Cold / Multisig Key)"]
+        Owner["Owner Key (Multisig / HSM)"]
+    end
 
-The owner **CANNOT**:
-- Access user funds directly
-- Withdraw funds from user accounts
-- Modify user balances
+    subgraph AgentZone["AI Agent Trust Zone (Hot Key)"]
+        Agent["AI Agent Hot Key (Automated Server)"]
+    end
 
-### AI Agent
+    subgraph UserZone["User Trust Zone (Public)"]
+        User["Depositors / Users"]
+    end
 
-The authorized AI agent has the following permissions:
-- **Rebalance**: Can call `rebalance()` to signal strategy changes and move funds between protocols
-- **Update Total Assets**: Can report yield accrual or strategy losses
-- **Read Access**: Can read all vault state to make yield decisions
+    subgraph CoreContract["NeuroWealth Vault Smart Contract"]
+        VaultState["Vault State & Share Accounting"]
+    end
 
-The agent **CANNOT**:
-- Withdraw user funds directly to itself
-- Change vault configuration (caps, pools)
-- Access USDC tokens directly outside of protocol interactions
-- Modify user balances without valid asset reporting
-- Pause or unpause the vault (owner-only, including emergency pause)
+    subgraph ExternalProtocols["External Protocols & Assets"]
+        USDC["USDC Token Issuer (Circle / SEP-41)"]
+        Blend["Blend Lending Pool"]
+        DEX["DEX Swap / Liquidity Pool"]
+    end
 
-### Users
+    Owner -->|Pause / Caps / Timelocked Upgrades / Pool Addresses| VaultState
+    Agent -->|Rebalance / Harvest / Report Assets| VaultState
+    User -->|Deposit / Withdraw / Strategy Choice| VaultState
+    VaultState -->|Transfer / Balance Query| USDC
+    VaultState -->|Supply / Redeem Liquidity| Blend
+    VaultState -->|Add / Remove Liquidity / Swap| DEX
+```
 
-Regular users have the following permissions:
-- **Deposit**: Can deposit USDC into the vault
-- **Withdraw**: Can withdraw their own USDC at any time
-- **Read**: Can query their balance and vault state
+### Detailed Trust Boundary Analysis (CAN vs. CANNOT)
 
-Users **CANNOT**:
-- Access other users' funds
-- Manipulate vault configuration
-- Call agent-only or owner-only functions
+#### 1. Owner Key (Cold / Multisig)
+The Owner key is the primary administrative authority of the contract. As mandated in [`docs/MAINNET_CHECKLIST.md`](docs/MAINNET_CHECKLIST.md) (Section 1), the Owner key MUST be stored in an offline/multisig cold environment separate from the AI Agent key.
+
+- **CAN**:
+  - Emergency pause and unpause the vault (`pause`, `emergency_pause`, `unpause`).
+  - Configure deposit safety caps (`set_caps`, `set_tvl_cap`, `set_user_deposit_cap`, `set_deposit_limits`).
+  - Set rebalance cooldowns and approval TTLs (`set_rebalance_cooldown`, `set_approval_ttl`).
+  - Initiate and execute timelocked AI agent rotations (`update_agent`, `confirm_agent_update`, `cancel_agent_update`).
+  - Schedule, execute, or cancel contract WASM upgrades behind a 24-hour timelock (`schedule_upgrade`, `execute_upgrade`, `cancel_upgrade`).
+  - Configure whitelisted external protocol pool addresses (`set_blend_pool`, `set_dex_pool`).
+  - Initiate and complete ownership transfers (`transfer_ownership`, `accept_ownership`).
+  - Execute emergency yield harvests during agent rotation (`emergency_harvest`).
+- **CANNOT**:
+  - Direct user USDC deposits to owner-controlled arbitrary wallets.
+  - Withdraw or burn user shares without explicit user authorization.
+  - Modify individual user share balances.
+  - Bypass upgrade or agent rotation timelocks (must wait 17,280 ledgers ≈ 24 hours).
+  - Perform instant WASM code replacements.
+
+#### 2. AI Agent Hot Key
+The AI Agent key is utilized by automated backend trading engines to execute strategy rebalances and update yield metrics. Because it operates in a hot server environment, it faces higher risk of exposure.
+
+- **CAN**:
+  - Trigger protocol allocation adjustments between whitelisted strategies (`rebalance`).
+  - Execute routine yield compounding (`harvest`).
+  - Report total asset valuations and strategy yield/losses (`update_total_assets`).
+- **CANNOT**:
+  - Transfer vault funds to external addresses outside whitelisted protocol pools.
+  - Change vault administrative configurations (caps, pool targets, timelocks, owners).
+  - Bypass solvency verification during asset updates (cannot inflate total assets beyond actual balance + pool holdings).
+  - Report losses exceeding the per-call decrease cap (capped at `max_decrease_bps`, default 10%).
+  - Pause or unpause the contract.
+  - Modify user strategy choices or user balances directly.
+
+#### 3. Depositors / Regular Users
+Depositors are un-privileged external accounts interacting with the vault to earn yield.
+
+- **CAN**:
+  - Deposit USDC into the vault to mint proportional shares (`deposit`, `batch_deposit`).
+  - Redeem vault shares for underlying USDC at any time (`withdraw`, `withdraw_all`).
+  - Select individual yield strategy preferences (`set_user_strategy`).
+  - Call permissionless maintenance utilities (`touch_user_ttl`).
+- **CANNOT**:
+  - Withdraw funds belonging to other depositors.
+  - Trigger vault rebalances or alter asset accounting.
+  - Modify vault caps or administrative settings.
+  - Inflate share exchange rates (defeated by storage-based asset accounting & minimum deposit floors).
+
+#### 4. Blend Protocol Pool Contract
+External lending pool integration.
+
+- **CAN**:
+  - Receive supplied USDC from the vault.
+  - Generate interest on deployed USDC positions.
+  - Return liquidity upon vault redemption requests.
+  - Report current pool utilization and liquidity availability.
+- **CANNOT**:
+  - Mutate `NeuroWealthVault` contract storage or state.
+  - Seize idle USDC held in the vault contract.
+  - Force liquidations or alter share accounting inside the vault.
+
+#### 5. DEX Protocol Pool Contract
+External Automated Market Maker (AMM) pool integration.
+
+- **CAN**:
+  - Execute token swaps during strategy shifts.
+  - Receive and return liquidity pool tokens.
+- **CANNOT**:
+  - Access vault funds outside explicit allowance approvals.
+  - Mutate vault contract state or storage.
+
+#### 6. USDC Token Issuer (Circle / Stellar Admin)
+The asset issuer controlling the underlying USDC token contract on Stellar.
+
+- **CAN**:
+  - Issue, mint, or burn global USDC tokens.
+  - Freeze or clawback token balances on flagged Stellar accounts (Stellar Asset Control flags).
+- **CANNOT**:
+  - Access or alter internal vault share accounting (`DataKey::Shares`, `DataKey::TotalShares`).
+  - Bypass contract authorization rules.
+
+---
+
+### Mapping External Call Sites to Trust Assumptions
+
+Every external contract call in [`neurowealth-vault/contracts/vault/src/lib.rs`](neurowealth-vault/contracts/vault/src/lib.rs) relies on specific trust assumptions and implements technical mitigations:
+
+| External Call Site | Target Contract | Trust Assumption | Security Mitigation |
+|-------------------|-----------------|------------------|---------------------|
+| `token_client.transfer` (`deposit`, `withdraw`, `batch_deposit`, `withdraw_all`) | USDC Token Contract | Assumes token contract conforms strictly to Soroban Token Standard (SEP-41) and transfers requested amount accurately without unexpected side-effects. | All storage state updates execute **before** external `transfer` calls (Checks-Effects-Interactions pattern enforced by Issue #568 and `check-stale-state-audit.sh`). |
+| `token_client.balance` (`withdraw`, `update_total_assets`, `rebalance`) | USDC Token Contract | Assumes token balance queries return non-manipulated, accurate token counts held by vault. | Balance queries are used as upper-bound solvency checks; direct token transfers into vault cannot inflate share price (storage-based accounting). |
+| `BlendPoolClient::submit_with_allowance` & `withdraw` (`supply_to_blend`, `withdraw_from_blend`) | Whitelisted Blend Pool | Assumes Blend pool honors liquidity deposit/withdrawal calls and accurately computes interest. | Blend pool address is restricted to `DataKey::BlendPool` whitelisted strictly by the Owner. Partial withdrawal logic prevents vault lockup during high pool utilization. |
+| `BlendPoolClient::get_balance` (`update_total_assets`, `get_protocol_balance`) | Whitelisted Blend Pool | Assumes Blend pool accurately reports deployed balance. | Deployed balance is queried solely for solvency validation; loss updates are bounded by owner co-signatures and per-call decrease caps (max 10%). |
+| `DexPoolClient::add_liquidity` & `remove_liquidity` (`supply_to_dex`, `withdraw_from_dex`) | Whitelisted DEX Pool | Assumes AMM pool processes liquidity additions/withdrawals cleanly without excessive slippage. | DEX pool target is restricted to `DataKey::DexPool` set by Owner. Strategy-switch fallback returns funds to idle if DEX pool liquidity is insufficient. |
+| `DexPoolClient::get_balance` (`update_total_assets`, `get_protocol_balance`) | Whitelisted DEX Pool | Assumes DEX pool correctly reports vault LP position value. | Solvency validation guardrail; updates are rate-limited and loss-capped. |
+
+---
+
+### Mainnet Checklist Alignment & Verification
+
+This threat model has been formally reviewed against [`docs/MAINNET_CHECKLIST.md`](docs/MAINNET_CHECKLIST.md):
+
+- **Section 1 Compliance (Key Management & Separation)**:
+  - Confirms complete independence of Owner ($G_{owner}$) and Agent ($G_{agent}$) keypairs.
+  - Strictly isolates the Hot Agent Key (capable only of `rebalance`/`harvest`/`update_total_assets`) from the Cold Owner Key (capable of administrative governance and code upgrades).
+- **Section 7 Compliance (Upgrade & Governance Multisig Plan)**:
+  - Enforces mandatory 24-hour timelock (`UPGRADE_TIMELOCK_LEDGERS = 17_280`) for all contract code upgrades (`schedule_upgrade` $\rightarrow$ `execute_upgrade`).
+  - Provides a cancellation window (`cancel_upgrade`) allowing security monitoring to block malicious or mistaken upgrades during the 24-hour window.
+  - Recommends Stellar Multisig or hardware cold storage for the Owner key on mainnet deployments.
 
 ## Withdrawal Guarantees
 
@@ -151,6 +257,133 @@ to compound yield during this window:
 | Function | Owner | Agent | User | Anyone |
 |----------|-------|-------|------|--------|
 | emergency_harvest | yes | - | - | - |
+
+## Pause-Semantics Matrix
+
+> **Issue #601** — Definitive table of which functions are blocked vs. allowed
+> while the vault is paused. This table is the source of truth; the exhaustive
+> test in
+> [`neurowealth-vault/contracts/vault/src/tests/test_pause.rs`](neurowealth-vault/contracts/vault/src/tests/test_pause.rs)
+> encodes it as parameterised assertions so future functions cannot silently
+> bypass pause checks.
+
+### Legend
+
+| Symbol | Meaning |
+|--------|---------|
+| 🔴 BLOCKED | Function panics with `VaultError::Paused` (#35) when the vault is paused |
+| 🟢 ALLOWED | Function executes normally while the vault is paused |
+
+### State-Changing Functions
+
+| Function | Caller | Paused Behaviour | Rationale |
+|----------|--------|-----------------|-----------|
+| `deposit` | User | 🔴 BLOCKED | No new deposits accepted during an emergency |
+| `batch_deposit` | User | 🔴 BLOCKED | Same reason as `deposit` |
+| `withdraw` | User | 🔴 BLOCKED | See note below on withdrawal semantics |
+| `withdraw_all` | User | 🔴 BLOCKED | See note below on withdrawal semantics |
+| `rebalance` | Agent | 🔴 BLOCKED | No fund movement while vault is paused |
+| `harvest` | Agent | 🔴 BLOCKED | No protocol interaction while paused |
+| `schedule_upgrade` | Owner | 🔴 BLOCKED | Upgrades must not be proposed during an emergency |
+| `execute_upgrade` | Owner | 🔴 BLOCKED | Execution of a pending upgrade requires unpaused vault |
+| `cancel_upgrade` | Owner | 🟢 ALLOWED | Cancelling a malicious upgrade must be possible even while paused |
+| `update_total_assets` | Agent + Owner | 🟢 ALLOWED | Yield/loss reporting should remain available for bookkeeping |
+| `emergency_harvest` | Owner | 🟢 ALLOWED | Owner fallback for compounding yield during an agent-key rotation; explicitly bypasses pause |
+| `pause` | Owner | 🟢 ALLOWED | Must be callable to transition into the paused state |
+| `unpause` | Owner | 🟢 ALLOWED | Must be callable to resume normal operations |
+| `emergency_pause` | Owner | 🟢 ALLOWED | Must be callable even when already paused (idempotent) |
+| `update_agent` | Owner | 🟢 ALLOWED | Agent rotation is a recovery action; blocking it during a pause would worsen an incident |
+| `confirm_agent_update` | Owner | 🟢 ALLOWED | Completing agent rotation must not be blocked |
+| `cancel_agent_update` | Owner | 🟢 ALLOWED | Cancelling a malicious agent update must always be possible |
+| `transfer_ownership` | Owner | 🟢 ALLOWED | Ownership rotation is a recovery action |
+| `accept_ownership` | Pending owner | 🟢 ALLOWED | Completing ownership transfer must not be blocked |
+| `cancel_ownership_transfer` | Owner | 🟢 ALLOWED | Must remain available during emergencies |
+| `set_tvl_cap` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_user_deposit_cap` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_caps` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_deposit_limits` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_limits` (deprecated) | Owner | 🟢 ALLOWED | Same as `set_caps` |
+| `set_blend_pool` | Owner | 🟢 ALLOWED | Pool reconfiguration is a recovery action |
+| `set_dex_pool` | Owner | 🟢 ALLOWED | Pool reconfiguration is a recovery action |
+| `set_rebalance_cooldown` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_approval_ttl` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_blend_approval_ttl` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_max_consecutive_failures` | Owner | 🟢 ALLOWED | Configuration changes should be possible during a pause |
+| `set_user_strategy` | User | 🟢 ALLOWED | Preference storage; no fund movement |
+| `touch_user_ttl` | Anyone | 🟢 ALLOWED | Permissionless TTL maintenance; no fund movement |
+| `initialize` | Deployer | 🟢 ALLOWED | Initialization runs before pause is even possible |
+
+### Read-Only / View Functions
+
+All view/getter functions are 🟢 **ALLOWED** while paused. They perform no
+state changes and emit no events. Blocking them during a pause would prevent
+operators from assessing vault state.
+
+| Function | Paused Behaviour |
+|----------|-----------------|
+| `is_paused` | 🟢 ALLOWED |
+| `get_balance` | 🟢 ALLOWED |
+| `get_total_deposits` | 🟢 ALLOWED |
+| `get_total_assets` | 🟢 ALLOWED |
+| `get_total_shares` | 🟢 ALLOWED |
+| `get_shares` | 🟢 ALLOWED |
+| `get_users_with_shares` | 🟢 ALLOWED |
+| `get_user_info` | 🟢 ALLOWED |
+| `get_owner` | 🟢 ALLOWED |
+| `get_agent` | 🟢 ALLOWED |
+| `get_version` | 🟢 ALLOWED |
+| `get_usdc_token` | 🟢 ALLOWED |
+| `get_current_protocol` | 🟢 ALLOWED |
+| `get_blend_pool` | 🟢 ALLOWED |
+| `get_dex_pool` | 🟢 ALLOWED |
+| `get_tvl_cap` | 🟢 ALLOWED |
+| `get_user_deposit_cap` | 🟢 ALLOWED |
+| `get_min_deposit` | 🟢 ALLOWED |
+| `get_max_deposit` | 🟢 ALLOWED |
+| `get_idle_balance` | 🟢 ALLOWED |
+| `get_deployed_assets` | 🟢 ALLOWED |
+| `get_asset_breakdown` | 🟢 ALLOWED |
+| `get_exchange_rate` | 🟢 ALLOWED |
+| `get_rebalance_cooldown` | 🟢 ALLOWED |
+| `get_last_rebalance_ledger` | 🟢 ALLOWED |
+| `get_approval_ttl` | 🟢 ALLOWED |
+| `get_blend_approval_ttl` | 🟢 ALLOWED |
+| `get_max_consecutive_failures` | 🟢 ALLOWED |
+| `get_consecutive_failures` | 🟢 ALLOWED |
+| `get_pending_upgrade` | 🟢 ALLOWED |
+| `get_pending_agent_update` | 🟢 ALLOWED |
+| `get_pending_owner` | 🟢 ALLOWED |
+| `get_pending_ownership` | 🟢 ALLOWED |
+| `get_user_strategy` | 🟢 ALLOWED |
+| `preview_deposit_to_shares` | 🟢 ALLOWED |
+| `preview_shares_to_assets` | 🟢 ALLOWED |
+| `preview_withdraw` | 🟢 ALLOWED |
+| `convert_to_shares` | 🟢 ALLOWED |
+| `convert_to_assets` | 🟢 ALLOWED |
+
+### Note on Withdrawal Semantics
+
+Both `withdraw` and `withdraw_all` are **blocked** while the vault is paused.
+This is a deliberate design choice:
+
+- The pause mechanism is an **emergency stop** intended to freeze all fund
+  movement while a security incident is investigated.
+- Allowing withdrawals while paused could enable a race between an attacker
+  (draining funds) and the security team (trying to stop the drain).
+- The owner-compromise runbook documents how to unpause safely once the
+  incident is resolved, at which point normal withdrawals resume immediately.
+
+If a future version of the protocol wishes to allow emergency withdrawals
+while paused, this would require a separate "withdrawal-allowed" flag that is
+independent of the pause flag, along with careful analysis of reentrancy and
+ordering risks.
+
+### Checklist for Adding New Functions
+
+When adding a new contract function, the author **must** update this matrix and
+the corresponding test in `test_pause.rs`. The PR review checklist
+(`.github/pull_request_template.md`) includes a pause-semantics item for this
+purpose.
 
 ## Security Best Practices Implemented
 

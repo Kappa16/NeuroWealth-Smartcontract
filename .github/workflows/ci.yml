@@ -47,6 +47,9 @@ jobs:
           - name: "No Bare Panic Check"
             step: "no-bare-panic"
             working_directory: "."
+          - name: "Stale-State Audit Check"
+            step: "stale-state-audit"
+            working_directory: "."
 
     steps:
       - name: Checkout code
@@ -209,6 +212,10 @@ jobs:
             no-bare-panic)
               bash scripts/check-no-bare-panic.sh \
                 neurowealth-vault/contracts/vault/src
+              ;;
+            stale-state-audit)
+              bash scripts/check-stale-state-audit.sh \
+                neurowealth-vault/contracts/vault/src/lib.rs
               ;;
             *)
               echo "Unknown step: ${{ matrix.step }}" >&2
