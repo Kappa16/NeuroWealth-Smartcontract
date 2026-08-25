@@ -1066,7 +1066,7 @@ const USER_SHARES_TTL_EXTEND_TO: u32 = 100;
 /// Default ledgers kept alive for Blend token approvals.
 ///
 /// The approval expiration ledger is calculated as:
-    /// `current_ledger_sequence + ApprovalTtl`.
+/// `current_ledger_sequence + ApprovalTtl`.
 const DEFAULT_BLEND_APPROVAL_TTL: u32 = 100_000;
 
 use topics::{
@@ -1074,12 +1074,12 @@ use topics::{
     TOPIC_AGENT_UPDATE_PROPOSED, TOPIC_APPROVAL_TTL_UPDATED, TOPIC_ASSETS_UPDATED,
     TOPIC_BLEND_POOL_CONFIGURED, TOPIC_BLEND_SUPPLY, TOPIC_BLEND_WITHDRAW, TOPIC_CAPS_UPDATED,
     TOPIC_DEPOSIT, TOPIC_DEPOSIT_LIMITS_UPDATED, TOPIC_DEX_POOL_CONFIGURED, TOPIC_DEX_SUPPLY,
-    TOPIC_DEX_WITHDRAW, TOPIC_EMERGENCY_HARVEST, TOPIC_EMERGENCY_PAUSED, TOPIC_INIT,
+    TOPIC_DEX_WITHDRAW, TOPIC_EMERGENCY_HARVEST, TOPIC_EMERGENCY_PAUSED, TOPIC_HARVEST, TOPIC_INIT,
     TOPIC_LIMITS_UPDATED, TOPIC_OWNERSHIP_CANCELLED, TOPIC_OWNERSHIP_INITIATED,
     TOPIC_OWNERSHIP_TRANSFERRED, TOPIC_PAUSED, TOPIC_PROTOCOL_CHANGED, TOPIC_REBALANCE,
     TOPIC_REBALANCE_COOLDOWN_UPDATED, TOPIC_REBALANCE_FAILED, TOPIC_TVL_CAP_UPDATED,
     TOPIC_UNPAUSED, TOPIC_UPGRADED, TOPIC_UPGRADE_CANCELLED, TOPIC_UPGRADE_SCHEDULED,
-    TOPIC_USER_CAP_UPDATED, TOPIC_USER_STRATEGY_UPDATED, TOPIC_WITHDRAW, TOPIC_HARVEST,
+    TOPIC_USER_CAP_UPDATED, TOPIC_USER_STRATEGY_UPDATED, TOPIC_WITHDRAW,
 };
 
 impl BlendPoolClient {
@@ -1531,7 +1531,9 @@ impl NeuroWealthVault {
         let new_total = total
             .checked_add(amount)
             .expect("vault: total deposits overflow");
-        env.storage().instance().set(&DataKey::TotalDeposits, &new_total);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalDeposits, &new_total);
 
         // Mint shares based on current share price and update total assets.
         // Inflation-attack mitigation: reject any deposit that would round down
@@ -1554,7 +1556,9 @@ impl NeuroWealthVault {
         let new_user_shares = current_shares
             .checked_add(shares_to_mint)
             .expect("vault: user shares overflow");
-        env.storage().persistent().set(&DataKey::Shares(user.clone()), &new_user_shares);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Shares(user.clone()), &new_user_shares);
 
         // Register the user in the active-share index the first time they hold
         // non-zero shares, so the `get_users_with_shares` indexer view can page
@@ -1596,14 +1600,18 @@ impl NeuroWealthVault {
         let new_total_shares = total_shares
             .checked_add(shares_to_mint)
             .expect("vault: total shares overflow");
-        env.storage().instance().set(&DataKey::TotalShares, &new_total_shares);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &new_total_shares);
 
         // Update total assets (principal + yield)
         let total_assets = Self::get_total_assets_internal(&env);
         let new_total_assets = total_assets
             .checked_add(amount)
             .expect("vault: total assets overflow");
-        env.storage().instance().set(&DataKey::TotalAssets, &new_total_assets);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalAssets, &new_total_assets);
 
         env.events().publish(
             (TOPIC_DEPOSIT, user.clone()),
@@ -1655,7 +1663,10 @@ impl NeuroWealthVault {
             let (token, amount) = entries.get(i).unwrap();
             // Until multi-asset is enabled, require all entries to use USDC.
             if token != usdc_token {
-                panic!("batch_deposit: token {:?} is not supported; only USDC is accepted", token);
+                panic!(
+                    "batch_deposit: token {:?} is not supported; only USDC is accepted",
+                    token
+                );
             }
             Self::require_positive_amount(&env, amount);
             total_amount = total_amount
@@ -1823,7 +1834,7 @@ impl NeuroWealthVault {
                 // Calculate how much we need to withdraw
                 let needed = amount
                     .checked_sub(vault_balance)
-                .expect("vault: withdrawal underflow");
+                    .expect("vault: withdrawal underflow");
 
                 // Attempt to withdraw from the active protocol (Blend or DEX).
                 // If this returns less than needed, we will reconcile below
@@ -1888,18 +1899,24 @@ impl NeuroWealthVault {
         let new_user_shares = user_shares
             .checked_sub(shares_to_burn)
             .expect("vault: withdrawal underflow");
-        env.storage().persistent().set(&DataKey::Shares(user.clone()), &new_user_shares);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Shares(user.clone()), &new_user_shares);
 
         let new_total_shares = total_shares
             .checked_sub(shares_to_burn)
             .expect("vault: withdrawal underflow");
-        env.storage().instance().set(&DataKey::TotalShares, &new_total_shares);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &new_total_shares);
 
         // Update total assets (principal + yield)
         let new_total_assets = total_assets
             .checked_sub(usdc_to_return)
             .expect("vault: withdrawal underflow");
-        env.storage().instance().set(&DataKey::TotalAssets, &new_total_assets);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalAssets, &new_total_assets);
 
         Self::reduce_total_deposits_on_withdraw(&env, usdc_to_return);
 
@@ -2021,19 +2038,25 @@ impl NeuroWealthVault {
         let new_user_shares = user_shares
             .checked_sub(shares_to_burn)
             .expect("vault: withdrawal underflow");
-        env.storage().persistent().set(&DataKey::Shares(user.clone()), &new_user_shares);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Shares(user.clone()), &new_user_shares);
 
         // Update total shares
         let new_total_shares = total_shares
             .checked_sub(shares_to_burn)
             .expect("vault: withdrawal underflow");
-        env.storage().instance().set(&DataKey::TotalShares, &new_total_shares);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &new_total_shares);
 
         // Update total assets
         let new_total_assets = total_assets
             .checked_sub(usdc_to_return)
             .expect("vault: withdrawal underflow");
-        env.storage().instance().set(&DataKey::TotalAssets, &new_total_assets);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalAssets, &new_total_assets);
 
         Self::reduce_total_deposits_on_withdraw(&env, usdc_to_return);
 
@@ -3610,7 +3633,9 @@ impl NeuroWealthVault {
 
         env.storage().instance().set(&DataKey::Agent, &new_agent);
         env.storage().instance().remove(&DataKey::PendingAgent);
-        env.storage().instance().remove(&DataKey::AgentTimelockExpiry);
+        env.storage()
+            .instance()
+            .remove(&DataKey::AgentTimelockExpiry);
 
         env.events().publish(
             (TOPIC_AGENT_UPDATE_CONFIRMED,),
@@ -3662,7 +3687,9 @@ impl NeuroWealthVault {
             .unwrap();
 
         env.storage().instance().remove(&DataKey::PendingAgent);
-        env.storage().instance().remove(&DataKey::AgentTimelockExpiry);
+        env.storage()
+            .instance()
+            .remove(&DataKey::AgentTimelockExpiry);
 
         env.events().publish(
             (TOPIC_AGENT_UPDATE_CANCELLED,),
@@ -4078,8 +4105,7 @@ impl NeuroWealthVault {
     /// `Some(PendingOwnershipInfo)` if a transfer is pending, `None` otherwise
     pub fn get_pending_ownership(env: Env) -> Option<PendingOwnershipInfo> {
         Self::require_initialized(&env);
-        let pending_owner: Option<Address> =
-            env.storage().instance().get(&DataKey::PendingOwner);
+        let pending_owner: Option<Address> = env.storage().instance().get(&DataKey::PendingOwner);
         pending_owner.map(|owner| PendingOwnershipInfo {
             pending_owner: owner,
             timelock_expiry: 0,
@@ -4597,8 +4623,7 @@ impl NeuroWealthVault {
                     .unwrap_or(false);
                 if !already_paused {
                     env.storage().instance().set(&DataKey::Paused, &true);
-                    let owner: Address =
-                        env.storage().instance().get(&DataKey::Owner).unwrap();
+                    let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
                     env.events()
                         .publish((TOPIC_EMERGENCY_PAUSED,), EmergencyPausedEvent { owner });
                 }
@@ -6006,10 +6031,13 @@ impl NeuroWealthVault {
             return 0;
         }
 
-        let pool_address: Address = env.storage().instance().get(&DataKey::BlendPool).unwrap_or_else(|| {
-            panic_with_error!(env, VaultError::BlendPoolNotConfigured);
-            unreachable!()
-        });
+        let pool_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::BlendPool)
+            .unwrap_or_else(|| {
+                panic_with_error!(env, VaultError::BlendPoolNotConfigured)
+            });
 
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
         let vault_address = env.current_contract_address();
@@ -6127,10 +6155,13 @@ impl NeuroWealthVault {
     /// - Panics if Blend pool address is not configured
     /// - Emits BlendWithdrawEvent with success status and actual amount received
     fn withdraw_from_blend(env: &Env, amount: i128, min_out: i128) -> i128 {
-        let pool_address: Address = env.storage().instance().get(&DataKey::BlendPool).unwrap_or_else(|| {
-            panic_with_error!(env, VaultError::BlendPoolNotConfigured);
-            unreachable!()
-        });
+        let pool_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::BlendPool)
+            .unwrap_or_else(|| {
+                panic_with_error!(env, VaultError::BlendPoolNotConfigured)
+            });
 
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
         let vault_address = env.current_contract_address();
@@ -6206,10 +6237,13 @@ impl NeuroWealthVault {
             return 0;
         }
 
-        let pool_address: Address = env.storage().instance().get(&DataKey::DexPool).unwrap_or_else(|| {
-            panic_with_error!(env, VaultError::DexPoolNotConfigured);
-            unreachable!()
-        });
+        let pool_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::DexPool)
+            .unwrap_or_else(|| {
+                panic_with_error!(env, VaultError::DexPoolNotConfigured)
+            });
 
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
         let vault_address = env.current_contract_address();
@@ -6324,10 +6358,13 @@ impl NeuroWealthVault {
     /// - Panics with `MinOutNotMet` if the realized amount is below `min_out`
     /// - Emits `DexWithdrawEvent` with success status and actual amount received
     fn withdraw_from_dex(env: &Env, amount: i128, min_out: i128) -> i128 {
-        let pool_address: Address = env.storage().instance().get(&DataKey::DexPool).unwrap_or_else(|| {
-            panic_with_error!(env, VaultError::DexPoolNotConfigured);
-            unreachable!()
-        });
+        let pool_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::DexPool)
+            .unwrap_or_else(|| {
+                panic_with_error!(env, VaultError::DexPoolNotConfigured)
+            });
 
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
         let vault_address = env.current_contract_address();
