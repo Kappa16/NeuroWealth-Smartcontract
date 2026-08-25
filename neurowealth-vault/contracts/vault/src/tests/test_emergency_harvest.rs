@@ -42,14 +42,17 @@ fn test_owner_can_emergency_harvest() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, _agent, owner, _usdc_token, _blend_pool) =
-        setup_with_deployed_funds(&env);
+    let (contract_id, _agent, owner, _usdc_token, _blend_pool) = setup_with_deployed_funds(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     client.emergency_harvest(&0_i128);
 
     let events = find_events_by_topic(env.events().all(), &env, TOPIC_EMERGENCY_HARVEST);
-    assert_eq!(events.len(), 1, "exactly one EmergencyHarvestEvent expected");
+    assert_eq!(
+        events.len(),
+        1,
+        "exactly one EmergencyHarvestEvent expected"
+    );
 
     let (_, _, data) = &events[0];
     let event = EmergencyHarvestEvent::try_from_val(&env, data)
@@ -66,8 +69,7 @@ fn test_emergency_harvest_emits_distinct_topic_from_harvest() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, _agent, _owner, _usdc_token, _blend_pool) =
-        setup_with_deployed_funds(&env);
+    let (contract_id, _agent, _owner, _usdc_token, _blend_pool) = setup_with_deployed_funds(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     // Topics must be distinct so indexers can tell them apart.
@@ -87,8 +89,7 @@ fn test_emergency_harvest_requires_owner_auth() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, _agent, owner, _usdc_token, _blend_pool) =
-        setup_with_deployed_funds(&env);
+    let (contract_id, _agent, owner, _usdc_token, _blend_pool) = setup_with_deployed_funds(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     // With mock_all_auths, the owner.require_auth() check inside
@@ -123,8 +124,7 @@ fn test_emergency_harvest_rejects_negative_min_out() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, _agent, owner, _usdc_token, _blend_pool) =
-        setup_with_deployed_funds(&env);
+    let (contract_id, _agent, owner, _usdc_token, _blend_pool) = setup_with_deployed_funds(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     client.emergency_harvest(&-1_i128);
@@ -139,8 +139,7 @@ fn test_emergency_harvest_works_while_paused() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, _agent, owner, _usdc_token, _blend_pool) =
-        setup_with_deployed_funds(&env);
+    let (contract_id, _agent, owner, _usdc_token, _blend_pool) = setup_with_deployed_funds(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     // Pause the vault via owner.
@@ -207,8 +206,7 @@ fn test_emergency_harvest_respects_cooldown() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, _agent, owner, _usdc_token, _blend_pool) =
-        setup_with_deployed_funds(&env);
+    let (contract_id, _agent, owner, _usdc_token, _blend_pool) = setup_with_deployed_funds(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
 
     // Set a long cooldown.

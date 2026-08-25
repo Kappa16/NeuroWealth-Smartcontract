@@ -224,8 +224,8 @@ fn test_execute_after_timelock_passes_gate() {
 #[test]
 fn test_upgrade_timelock_full_lifecycle() {
     use crate::{UpgradedEvent, TOPIC_UPGRADED};
-    use soroban_sdk::TryFromVal;
     use soroban_sdk::IntoVal;
+    use soroban_sdk::TryFromVal;
 
     let env = Env::default();
     env.mock_all_auths();
@@ -243,11 +243,7 @@ fn test_upgrade_timelock_full_lifecycle() {
     client.schedule_upgrade(&owner, &wasm_hash);
 
     // Verify UpgradeScheduledEvent was emitted
-    let scheduled = find_events_by_topic(
-        env.events().all(),
-        &env,
-        crate::TOPIC_UPGRADE_SCHEDULED,
-    );
+    let scheduled = find_events_by_topic(env.events().all(), &env, crate::TOPIC_UPGRADE_SCHEDULED);
     assert_eq!(
         scheduled.len(),
         1,
@@ -262,10 +258,7 @@ fn test_upgrade_timelock_full_lifecycle() {
 
     // 3. Execute before timelock — must fail
     let before = client.try_execute_upgrade(&owner);
-    assert!(
-        before.is_err(),
-        "execute before timelock must be rejected"
-    );
+    assert!(before.is_err(), "execute before timelock must be rejected");
 
     // 4. Extend instance TTL BEFORE advancing sequence number so contract is not archived
     env.as_contract(&contract_id, || {
@@ -275,7 +268,10 @@ fn test_upgrade_timelock_full_lifecycle() {
 
     // 5. Execute upgrade after timelock — passes timelock gate (fails on WASM load in test env)
     let res = client.try_execute_upgrade(&owner);
-    assert!(res.is_err(), "execute with dummy hash fails at WASM load stage");
+    assert!(
+        res.is_err(),
+        "execute with dummy hash fails at WASM load stage"
+    );
 }
 
 /// Calling `cancel_upgrade` after `execute_upgrade` has completed (or when no pending upgrade exists)
@@ -302,8 +298,12 @@ fn test_cancel_upgrade_after_execute_upgrade_rejected() {
 
     // 3. Simulate completion of execute_upgrade by clearing pending upgrade state
     env.as_contract(&contract_id, || {
-        env.storage().instance().remove(&crate::DataKey::PendingUpgradeHash);
-        env.storage().instance().remove(&crate::DataKey::UpgradeTimelockExpiry);
+        env.storage()
+            .instance()
+            .remove(&crate::DataKey::PendingUpgradeHash);
+        env.storage()
+            .instance()
+            .remove(&crate::DataKey::UpgradeTimelockExpiry);
     });
     assert!(
         client.get_pending_upgrade().is_none(),
@@ -479,7 +479,10 @@ fn test_pending_wasm_hash_fixed_at_execution_time() {
     client.schedule_upgrade(&owner, &original_hash);
 
     let pending = client.get_pending_upgrade().unwrap();
-    assert_eq!(pending.0, original_hash, "pending hash should match scheduled hash");
+    assert_eq!(
+        pending.0, original_hash,
+        "pending hash should match scheduled hash"
+    );
 
     // Extend instance TTL before advancing sequence
     env.as_contract(&contract_id, || {

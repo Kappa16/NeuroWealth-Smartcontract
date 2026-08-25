@@ -15,7 +15,10 @@
 extern crate std;
 
 use super::utils::*;
-use crate::{BlendSupplyEvent, BlendWithdrawEvent, ProtocolChangedEvent, RebalanceEvent, RebalanceFailedEvent, TOPIC_PROTOCOL_CHANGED, TOPIC_REBALANCE_FAILED};
+use crate::{
+    BlendSupplyEvent, BlendWithdrawEvent, ProtocolChangedEvent, RebalanceEvent,
+    RebalanceFailedEvent, TOPIC_PROTOCOL_CHANGED, TOPIC_REBALANCE_FAILED,
+};
 use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, TryFromVal};
 
 // ============================================================================
@@ -825,11 +828,7 @@ fn test_rebalance_exit_failure_blocks_protocol_transition() {
     );
 
     // RebalanceFailedEvent must be emitted
-    let failed_events = find_events_by_topic(
-        env.events().all(),
-        &env,
-        TOPIC_REBALANCE_FAILED,
-    );
+    let failed_events = find_events_by_topic(env.events().all(), &env, TOPIC_REBALANCE_FAILED);
     assert_eq!(
         failed_events.len(),
         1,
@@ -893,8 +892,7 @@ fn test_rebalance_to_none_exit_failure_does_not_clear_protocol() {
     );
 
     // RebalanceFailedEvent must be emitted
-    let failed_events =
-        find_events_by_topic(env.events().all(), &env, TOPIC_REBALANCE_FAILED);
+    let failed_events = find_events_by_topic(env.events().all(), &env, TOPIC_REBALANCE_FAILED);
     assert_eq!(failed_events.len(), 1);
 
     let (_, _, data) = &failed_events[0];
@@ -929,8 +927,7 @@ fn test_protocol_changed_event_emitted_on_every_transition() {
     // Transition 1: none → blend
     client.rebalance(&symbol_short!("blend"), &800_i128, &0_i128);
 
-    let events_after_1 =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    let events_after_1 = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
     assert_eq!(
         events_after_1.len(),
         1,
@@ -938,16 +935,15 @@ fn test_protocol_changed_event_emitted_on_every_transition() {
     );
 
     let (_, _, data) = &events_after_1[0];
-    let e1 = ProtocolChangedEvent::try_from_val(&env, data)
-        .expect("Should be ProtocolChangedEvent");
+    let e1 =
+        ProtocolChangedEvent::try_from_val(&env, data).expect("Should be ProtocolChangedEvent");
     assert_eq!(e1.old_protocol, symbol_short!("none"));
     assert_eq!(e1.new_protocol, symbol_short!("blend"));
 
     // Transition 2: blend → none
     client.rebalance(&symbol_short!("none"), &0_i128, &0_i128);
 
-    let events_after_2 =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    let events_after_2 = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
     assert_eq!(
         events_after_2.len(),
         2,
@@ -955,16 +951,15 @@ fn test_protocol_changed_event_emitted_on_every_transition() {
     );
 
     let (_, _, data) = &events_after_2[1];
-    let e2 = ProtocolChangedEvent::try_from_val(&env, data)
-        .expect("Should be ProtocolChangedEvent");
+    let e2 =
+        ProtocolChangedEvent::try_from_val(&env, data).expect("Should be ProtocolChangedEvent");
     assert_eq!(e2.old_protocol, symbol_short!("blend"));
     assert_eq!(e2.new_protocol, symbol_short!("none"));
 
     // Idempotent rebalance (none → none): must NOT emit another event
     client.rebalance(&symbol_short!("none"), &0_i128, &0_i128);
 
-    let events_after_3 =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    let events_after_3 = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
     assert_eq!(
         events_after_3.len(),
         2,
@@ -991,8 +986,7 @@ fn test_protocol_changed_event_emitted_from_supply_path() {
     // This triggers supply_to_blend which calls set_current_protocol("blend")
     client.rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
 
-    let proto_events =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    let proto_events = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
     assert_eq!(
         proto_events.len(),
         1,
@@ -1000,8 +994,8 @@ fn test_protocol_changed_event_emitted_from_supply_path() {
     );
 
     let (_, _, data) = &proto_events[0];
-    let evt = ProtocolChangedEvent::try_from_val(&env, data)
-        .expect("Should be ProtocolChangedEvent");
+    let evt =
+        ProtocolChangedEvent::try_from_val(&env, data).expect("Should be ProtocolChangedEvent");
     assert_eq!(evt.old_protocol, symbol_short!("none"));
     assert_eq!(evt.new_protocol, symbol_short!("blend"));
 }
@@ -1026,15 +1020,13 @@ fn test_protocol_changed_event_on_user_withdraw_draining_blend() {
     // Supply to Blend — emits one ProtocolChangedEvent (none→blend)
     client.rebalance(&symbol_short!("blend"), &600_i128, &0_i128);
 
-    let events_before_wd =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    let events_before_wd = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
     assert_eq!(events_before_wd.len(), 1);
 
     // User drains the vault — Blend balance hits 0, set_current_protocol("none") fires
     client.withdraw_all(&user);
 
-    let events_after_wd =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    let events_after_wd = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
     assert_eq!(
         events_after_wd.len(),
         2,
@@ -1042,8 +1034,8 @@ fn test_protocol_changed_event_on_user_withdraw_draining_blend() {
     );
 
     let (_, _, data) = &events_after_wd[1];
-    let evt = ProtocolChangedEvent::try_from_val(&env, data)
-        .expect("Should be ProtocolChangedEvent");
+    let evt =
+        ProtocolChangedEvent::try_from_val(&env, data).expect("Should be ProtocolChangedEvent");
     assert_eq!(evt.old_protocol, symbol_short!("blend"));
     assert_eq!(evt.new_protocol, symbol_short!("none"));
 }
@@ -1112,9 +1104,12 @@ fn test_full_lifecycle_deposit_rebalance_yield_withdraw() {
     assert_eq!(client.get_total_shares(), total_deposited);
 
     // ProtocolChangedEvent: none → blend
-    let proto_events =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
-    assert_eq!(proto_events.len(), 1, "One ProtocolChangedEvent after rebalance to blend");
+    let proto_events = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    assert_eq!(
+        proto_events.len(),
+        1,
+        "One ProtocolChangedEvent after rebalance to blend"
+    );
     let (_, _, data) = &proto_events[0];
     let pce = ProtocolChangedEvent::try_from_val(&env, data).unwrap();
     assert_eq!(pce.old_protocol, symbol_short!("none"));
@@ -1139,10 +1134,9 @@ fn test_full_lifecycle_deposit_rebalance_yield_withdraw() {
     assert_eq!(client.get_total_shares(), total_deposited); // shares unchanged
 
     // Each user's share value: 10_000_000 shares × (22/20) = 11 USDC
-    let share_price_numerator = total_with_yield;  // 22_000_000
+    let share_price_numerator = total_with_yield; // 22_000_000
     let share_price_denominator = total_deposited; // 20_000_000
-    let user_a_entitlement =
-        deposit_a * share_price_numerator / share_price_denominator; // 11_000_000
+    let user_a_entitlement = deposit_a * share_price_numerator / share_price_denominator; // 11_000_000
     assert_eq!(user_a_entitlement, 11_000_000_i128);
 
     // ── PHASE 4: USER A WITHDRAWS (from Blend) ───────────────────────────────
@@ -1165,7 +1159,10 @@ fn test_full_lifecycle_deposit_rebalance_yield_withdraw() {
 
     // Blend withdrawal event fired
     let wd_events = collect_blend_withdraw_events(&env);
-    assert!(!wd_events.is_empty(), "BlendWithdrawEvent must fire on user withdrawal from Blend");
+    assert!(
+        !wd_events.is_empty(),
+        "BlendWithdrawEvent must fire on user withdrawal from Blend"
+    );
 
     // ── PHASE 5: REBALANCE → NONE ─────────────────────────────────────────────
     client.rebalance(&symbol_short!("none"), &0_i128, &0_i128);
@@ -1179,8 +1176,7 @@ fn test_full_lifecycle_deposit_rebalance_yield_withdraw() {
     );
 
     // ProtocolChangedEvent: blend → none
-    let proto_events_2 =
-        find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
+    let proto_events_2 = find_events_by_topic(env.events().all(), &env, TOPIC_PROTOCOL_CHANGED);
     assert_eq!(
         proto_events_2.len(),
         2,
@@ -1204,7 +1200,11 @@ fn test_full_lifecycle_deposit_rebalance_yield_withdraw() {
     // ── FINAL INVARIANTS ──────────────────────────────────────────────────────
     assert_eq!(client.get_total_shares(), 0, "All shares must be burned");
     assert_eq!(client.get_total_assets(), 0, "All assets must be returned");
-    assert_eq!(client.get_total_deposits(), 0, "Deposits tracker must be zero");
+    assert_eq!(
+        client.get_total_deposits(),
+        0,
+        "Deposits tracker must be zero"
+    );
     assert_eq!(
         vault_usdc_balance(&env, &usdc_token, &contract_id),
         0,
@@ -1214,8 +1214,7 @@ fn test_full_lifecycle_deposit_rebalance_yield_withdraw() {
     // Total paid out = both users received principal + proportional yield
     let total_paid = token_client.balance(&user_a) + token_client.balance(&user_b);
     assert_eq!(
-        total_paid,
-        total_with_yield,
+        total_paid, total_with_yield,
         "Sum of all withdrawals must equal total_deposited + yield"
     );
 }

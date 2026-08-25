@@ -822,8 +822,7 @@ fn test_blend_pool_rotation_while_deployed_strands_funds() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, _agent, owner, usdc_token, old_pool) =
-        setup_vault_with_token_and_blend(&env);
+    let (contract_id, _agent, owner, usdc_token, old_pool) = setup_vault_with_token_and_blend(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
     let token_client = TestTokenClient::new(&env, &usdc_token);
     let old_pool_client = MockBlendPoolClient::new(&env, &old_pool);
@@ -884,8 +883,7 @@ fn test_dex_pool_rotation_while_deployed_strands_funds() {
     let env = Env::default();
     env.mock_all_auths();
 
-    let (contract_id, _agent, owner, usdc_token, old_pool) =
-        setup_vault_with_token_and_dex(&env);
+    let (contract_id, _agent, owner, usdc_token, old_pool) = setup_vault_with_token_and_dex(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
     let token_client = TestTokenClient::new(&env, &usdc_token);
     let old_pool_client = MockDexPoolClient::new(&env, &old_pool);

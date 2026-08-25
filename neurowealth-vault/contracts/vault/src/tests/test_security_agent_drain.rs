@@ -169,7 +169,10 @@ fn test_security_inflation_attack_bounded_by_actual_assets() {
 
     let b_balance_after = client.get_balance(&user_b);
     assert_eq!(b_balance_after, b_balance_before - half);
-    assert!(b_balance_after >= 0, "accomplice balance must be non-negative");
+    assert!(
+        b_balance_after >= 0,
+        "accomplice balance must be non-negative"
+    );
 
     // Core: total assets in vault must still equal actual USDC backing.
     let total_assets = client.get_total_assets();

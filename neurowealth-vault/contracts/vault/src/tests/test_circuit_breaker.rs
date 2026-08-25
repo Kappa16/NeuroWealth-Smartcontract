@@ -16,7 +16,8 @@ use soroban_sdk::{symbol_short, testutils::Address as _, Address, Env, TryFromVa
 /// Deploys a vault, configures Blend, deposits `amount`, and forces the Blend
 /// pool to reject all supply so every `rebalance("blend")` fails.
 fn setup_failing_blend(env: &Env, amount: i128) -> (NeuroWealthVaultClient<'_>, Address, Address) {
-    let (contract_id, _agent, owner, usdc_token, blend_pool) = setup_vault_with_token_and_blend(env);
+    let (contract_id, _agent, owner, usdc_token, blend_pool) =
+        setup_vault_with_token_and_blend(env);
     let client = NeuroWealthVaultClient::new(env, &contract_id);
     let blend_client = MockBlendPoolClient::new(env, &blend_pool);
 
@@ -51,8 +52,7 @@ fn test_auto_pause_after_default_threshold_failures() {
 
     let (client, owner, _blend_pool) = setup_failing_blend(&env, 10_000_000_i128);
 
-    let emerg_before =
-        find_events_by_topic(env.events().all(), &env, TOPIC_EMERGENCY_PAUSED).len();
+    let emerg_before = find_events_by_topic(env.events().all(), &env, TOPIC_EMERGENCY_PAUSED).len();
 
     // Failure 1 and 2 must not pause.
     client.rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
@@ -76,13 +76,16 @@ fn test_auto_pause_after_default_threshold_failures() {
         "auto-pause must emit one EmergencyPausedEvent"
     );
     let (_, _, data) = emerg_events.last().unwrap();
-    let event = EmergencyPausedEvent::try_from_val(&env, data)
-        .expect("EmergencyPausedEvent decode failed");
+    let event =
+        EmergencyPausedEvent::try_from_val(&env, data).expect("EmergencyPausedEvent decode failed");
     assert_eq!(event.owner, owner, "event owner must be the stored owner");
 
     // Once paused, further rebalances revert.
     let res = client.try_rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
-    assert!(res.is_err(), "rebalance must fail while the vault is paused");
+    assert!(
+        res.is_err(),
+        "rebalance must fail while the vault is paused"
+    );
 }
 
 #[test]
@@ -100,7 +103,10 @@ fn test_custom_threshold_via_setter() {
     assert!(!client.is_paused(), "one failure below custom threshold");
 
     client.rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
-    assert!(client.is_paused(), "second failure trips the custom threshold");
+    assert!(
+        client.is_paused(),
+        "second failure trips the custom threshold"
+    );
 }
 
 #[test]

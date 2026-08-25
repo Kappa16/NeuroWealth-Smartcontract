@@ -385,7 +385,11 @@ fn test_set_caps_emits_caps_event_with_correct_payload() {
 
     // Must emit individual UserDepositCapUpdatedEvent
     let user_events = find_events_by_topic(env.events().all(), &env, TOPIC_USER_CAP_UPDATED);
-    assert_eq!(user_events.len(), 1, "set_caps should emit a UserDepositCapUpdatedEvent");
+    assert_eq!(
+        user_events.len(),
+        1,
+        "set_caps should emit a UserDepositCapUpdatedEvent"
+    );
     let (_, _, user_data) = &user_events[0];
     let user_event = UserDepositCapUpdatedEvent::try_from_val(&env, user_data)
         .expect("Should be a UserDepositCapUpdatedEvent");
@@ -395,17 +399,25 @@ fn test_set_caps_emits_caps_event_with_correct_payload() {
 
     // Must emit individual TvlCapUpdatedEvent
     let tvl_events = find_events_by_topic(env.events().all(), &env, TOPIC_TVL_CAP_UPDATED);
-    assert_eq!(tvl_events.len(), 1, "set_caps should emit a TvlCapUpdatedEvent");
+    assert_eq!(
+        tvl_events.len(),
+        1,
+        "set_caps should emit a TvlCapUpdatedEvent"
+    );
     let (_, _, tvl_data) = &tvl_events[0];
-    let tvl_event = TvlCapUpdatedEvent::try_from_val(&env, tvl_data)
-        .expect("Should be a TvlCapUpdatedEvent");
+    let tvl_event =
+        TvlCapUpdatedEvent::try_from_val(&env, tvl_data).expect("Should be a TvlCapUpdatedEvent");
     assert_eq!(tvl_event.old_cap, old_tvl_cap);
     assert_eq!(tvl_event.new_cap, tvl_cap);
     assert_eq!(tvl_event.timestamp, expected_ts);
 
     // Must still emit combined CapsUpdatedEvent for backward compatibility
     let caps_events = find_events_by_topic(env.events().all(), &env, TOPIC_CAPS_UPDATED);
-    assert_eq!(caps_events.len(), 1, "set_caps should emit a CapsUpdatedEvent");
+    assert_eq!(
+        caps_events.len(),
+        1,
+        "set_caps should emit a CapsUpdatedEvent"
+    );
 
     let (_, _, data) = &caps_events[0];
     let event = CapsUpdatedEvent::try_from_val(&env, data).expect("Should be a CapsUpdatedEvent");
