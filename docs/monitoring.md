@@ -537,3 +537,124 @@ Soroban does not expose wall-clock time natively. Use ledger sequence as a proxy
 These are estimates. Use `env.ledger().sequence()` for precise comparisons in
 contract code; cross-reference with Stellar Horizon for wall-clock mapping in
 off-chain monitoring.
+
+---
+
+## 11. Rebalance APY Deviation & Frequency Monitoring (Rogue-Agent Detection)
+
+The agent key is the only address that can call `rebalance()`. A compromised or
+malfunctioning agent will usually reveal itself in one of two ways before funds
+are at risk: the `expected_apy` it reports drifts away from what the underlying
+protocols actually pay, or it starts rebalancing far more often than policy
+allows. Both are observable from the `RebalanceEvent` stream alone
+(topic `"rebalance"`, see [EVENTS.md](../EVENTS.md)), so indexers can enforce
+these rules without any contract change.
+
+### Rolling Confidence Band on `expected_apy`
+
+Maintain a rolling statistical band over the `expected_apy` field (basis
+points) of recent successful rebalances and flag any new value that falls
+outside it:
+
+| Parameter        | Recommended value                       | Rationale                                                          |
+| ---------------- | --------------------------------------- | ------------------------------------------------------------------ |
+| Window           | Trailing 30 days of `rebalance` events  | Long enough to smooth market moves, short enough to track regimes  |
+| Minimum samples  | 10 events                               | Below this, fall back to the absolute bounds only                  |
+| Band             | `mean ± 3 × stddev` of windowed values  | ~99.7% of honest values fall inside a 3σ band                      |
+| Absolute floor   | `0` bps                                 | Contract already rejects negative values                           |
+| Absolute ceiling | `2000` bps (20%)                        | Sustained APY above this on Blend/DEX USDC strategies is implausible |
+
+Evaluation rule for each new `RebalanceEvent`:
+
+1. If fewer than the minimum samples exist, alert only when
+   `expected_apy > absolute ceiling`.
+2. Otherwise alert when `expected_apy < max(floor, mean − 3σ)` or
+   `expected_apy > min(ceiling, mean + 3σ)`.
+3. Exclude `status = "failed"` events from the window (they never moved funds)
+   but still evaluate them — a failed rebalance with an absurd APY claim is
+   itself a signal.
+
+### Rebalance-Frequency Rate Policy
+
+`MinRebalanceInterval` already hard-blocks calls that arrive inside the
+cooldown (`Error(Contract, #14)`), so on-chain state cannot churn faster than
+the cooldown allows. The monitoring rule instead watches for an agent that
+rebalances *at* the maximum allowed rate, which honest strategies rarely do:
+
+| Signal                | Threshold                                              | Severity |
+| --------------------- | ------------------------------------------------------ | -------- |
+| Sustained max-rate    | > 6 rebalances in 24 h each landing < 10 min after cooldown expiry | high     |
+| Frequency spike       | 24 h rebalance count > 4 × trailing 30-day daily average | medium   |
+| Cooldown probing      | ≥ 3 `Error(Contract, #14)` failures in 1 h              | medium   |
+
+### Alert Definitions
+
+```
+ALERT: apy_out_of_band
+  condition: RebalanceEvent.expected_apy outside [mean - 3*stddev, mean + 3*stddev]
+             over trailing 30d window (min 10 samples), or > 2000 bps absolute
+  severity: high
+  action: Page on-call; cross-check reported APY against Blend/DEX pool rates;
+          if unexplained, treat agent key as compromised (see
+          AGENT_KEY_COMPROMISE_RUNBOOK.md) and prepare emergency_pause
+
+ALERT: rebalance_rate_spike
+  condition: count(rebalance events, 24h) > 4 * avg_daily_count_30d
+             OR sustained max-rate pattern (see table above)
+  severity: medium
+  action: Audit recent rebalance decisions against strategy policy; verify
+          agent infrastructure has not been re-pointed or duplicated
+```
+
+### Example Indexer Pseudo-Query
+
+Assuming rebalance events are indexed into an `events` table with the payload
+decoded into columns:
+
+```sql
+-- One row per new rebalance event, flagged if outside the rolling band.
+WITH window_stats AS (
+  SELECT
+    AVG(expected_apy)          AS mean_apy,
+    STDDEV_SAMP(expected_apy)  AS sd_apy,
+    COUNT(*)                   AS n
+  FROM events
+  WHERE topic = 'rebalance'
+    AND status <> 'failed'
+    AND ledger_closed_at >= NOW() - INTERVAL '30 days'
+)
+SELECT
+  e.tx_hash,
+  e.expected_apy,
+  w.mean_apy,
+  w.sd_apy,
+  CASE
+    WHEN e.expected_apy > 2000 THEN 'out_of_band'          -- absolute ceiling
+    WHEN w.n < 10 THEN 'insufficient_history'
+    WHEN e.expected_apy NOT BETWEEN GREATEST(0,   w.mean_apy - 3 * w.sd_apy)
+                                AND LEAST(2000, w.mean_apy + 3 * w.sd_apy)
+      THEN 'out_of_band'
+    ELSE 'ok'
+  END AS verdict
+FROM events e, window_stats w
+WHERE e.topic = 'rebalance'
+  AND e.ledger_closed_at >= NOW() - INTERVAL '1 hour';
+```
+
+Frequency-spike variant:
+
+```sql
+SELECT COUNT(*) AS last_24h,
+       (SELECT COUNT(*) / 30.0 FROM events
+         WHERE topic = 'rebalance'
+           AND ledger_closed_at >= NOW() - INTERVAL '30 days') AS daily_avg_30d
+FROM events
+WHERE topic = 'rebalance'
+  AND ledger_closed_at >= NOW() - INTERVAL '24 hours'
+HAVING COUNT(*) > 4 * (SELECT COUNT(*) / 30.0 FROM events
+                        WHERE topic = 'rebalance'
+                          AND ledger_closed_at >= NOW() - INTERVAL '30 days');
+```
+
+Tune the multipliers per deployment; record any changes to the band or rate
+policy in the incident-response log so alert history stays interpretable.

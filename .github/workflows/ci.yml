@@ -234,6 +234,12 @@ jobs:
   cargo-deny:
     name: Dependency Audit (cargo-deny)
     runs-on: ubuntu-latest
+    # The workflow-level weekly cron (Sunday 03:00 UTC) re-runs this job
+    # against a fresh RustSec advisory database, so advisories published
+    # against pinned dependencies surface without waiting for a PR.
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -249,6 +255,82 @@ jobs:
           # Respect the [graph] settings in deny.toml instead of forcing
           # --all-features (the action's default).
           arguments: ""
+
+      - name: Open or update advisory tracking issue
+        # Only scheduled runs manage the tracking issue: a per-PR failure is
+        # already visible on the PR itself, while a scheduled failure has no
+        # PR to surface it and would otherwise go unnoticed.
+        if: failure() && github.event_name == 'schedule'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const title = 'Scheduled cargo-deny audit is failing (dependency advisory drift)';
+            const runUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const body = [
+              'The weekly scheduled `cargo deny check` run failed, meaning a new',
+              'RustSec advisory (or license/ban/source violation) now applies to the',
+              'pinned dependency graph even though no PR has touched it.',
+              '',
+              `- Failing run: ${runUrl}`,
+              '- Policy: `deny.toml` (workspace: `neurowealth-vault/Cargo.toml`)',
+              '',
+              'Triage: inspect the run log for the advisory ID, then either upgrade',
+              'the affected dependency or record a justified exception in',
+              '`deny.toml`. Close this issue once a scheduled run passes again.',
+            ].join('\n');
+
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 100,
+            });
+            const existing = issues.find((issue) => issue.title === title);
+            if (existing) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existing.number,
+                body: `Still failing as of the latest scheduled run: ${runUrl}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+              });
+            }
+
+  reproducible-build:
+    name: Reproducible Build Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Two clean uncached builds are expensive, so this runs where an
+    # attestation matters — weekly, on demand, and on pushes to main —
+    # rather than on every PR.
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-opt
+        run: cargo install wasm-opt --locked
+
+      # No build caches on purpose: a reproducibility attestation must come
+      # from two genuinely clean builds.
+      - name: Dual build + hash comparison
+        run: bash scripts/check-reproducible-build.sh
 
   readme-check:
     name: README Validation
