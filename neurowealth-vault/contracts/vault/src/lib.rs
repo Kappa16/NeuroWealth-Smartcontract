@@ -850,6 +850,19 @@ pub struct ApprovalTtlUpdatedEvent {
     pub new_ttl: u32,
 }
 
+/// Emitted when the owner changes the circuit-breaker threshold via
+/// `set_max_consecutive_failures`.
+///
+/// # Topics
+/// - `SymbolShort("maxf_upd")` (`TOPIC_MAX_FAILURES_UPDATED`) - Event identifier
+#[contracttype]
+pub struct MaxConsecutiveFailuresUpdatedEvent {
+    /// Effective threshold before the change (the default if never configured)
+    pub old_threshold: u32,
+    /// Threshold after the change
+    pub new_threshold: u32,
+}
+
 /// Emitted when the AI agent address changes.
 ///
 /// Published alongside [`AgentUpdateConfirmedEvent`] by `confirm_agent_update`
@@ -1389,6 +1402,7 @@ use topics::{
     TOPIC_REBALANCE_COOLDOWN_UPDATED, TOPIC_REBALANCE_FAILED, TOPIC_TVL_CAP_UPDATED,
     TOPIC_UNPAUSED, TOPIC_UPGRADED, TOPIC_UPGRADE_CANCELLED, TOPIC_UPGRADE_SCHEDULED,
     TOPIC_USER_CAP_UPDATED, TOPIC_USER_STRATEGY_UPDATED, TOPIC_WITHDRAW,
+    TOPIC_MAX_FAILURES_UPDATED,
 };
 
 impl BlendPoolClient {
@@ -4389,8 +4403,10 @@ impl NeuroWealthVault {
     ///
     /// # Events
     ///
-    /// None. This is configuration-only; read the effective value back with
-    /// [`get_max_consecutive_failures`](crate::NeuroWealthVault::get_max_consecutive_failures).
+    /// Emits:
+    /// - [`MaxConsecutiveFailuresUpdatedEvent`] with the previous effective
+    ///   threshold and the newly configured one, so off-chain monitoring has a
+    ///   full audit trail of circuit-breaker sensitivity changes.
     ///
     /// # Panics
     ///
@@ -4404,9 +4420,19 @@ impl NeuroWealthVault {
         Self::require_is_owner(&env);
         Self::require(&env, threshold >= 1, VaultError::InvalidStrategy);
 
+        let old_threshold = Self::effective_max_consecutive_failures(&env);
+
         env.storage()
             .instance()
             .set(&DataKey::MaxConsecutiveFailures, &threshold);
+
+        env.events().publish(
+            (TOPIC_MAX_FAILURES_UPDATED,),
+            MaxConsecutiveFailuresUpdatedEvent {
+                old_threshold,
+                new_threshold: threshold,
+            },
+        );
     }
 
     /// Returns the configured circuit-breaker threshold (Issue #439), or
@@ -5143,15 +5169,32 @@ impl NeuroWealthVault {
     ///
     /// The approval expiration ledger is computed as:
     /// `env.ledger().sequence() + blend_approval_ttl`
+    ///
+    /// # Events
+    ///
+    /// Emits:
+    /// - [`ApprovalTtlUpdatedEvent`] (same topic as `set_approval_ttl`, since
+    ///   both mutate the shared [`DataKey::ApprovalTtl`]), so indexers can
+    ///   watch a single topic for every approval-TTL change.
     pub fn set_blend_approval_ttl(env: Env, owner: Address, blend_approval_ttl: u32) {
         Self::require_initialized(&env);
         owner.require_auth();
         let stored_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
         Self::require(&env, owner == stored_owner, VaultError::CallerIsNotOwner);
 
+        let old_ttl = Self::get_approval_ttl_internal(&env);
+
         env.storage()
             .instance()
             .set(&DataKey::ApprovalTtl, &blend_approval_ttl);
+
+        env.events().publish(
+            (TOPIC_APPROVAL_TTL_UPDATED,),
+            ApprovalTtlUpdatedEvent {
+                old_ttl,
+                new_ttl: blend_approval_ttl,
+            },
+        );
     }
 
     // ==========================================================================
