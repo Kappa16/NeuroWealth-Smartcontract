@@ -26,18 +26,22 @@ Monitor these metrics continuously across every ledger window.
 
 These conditions indicate abnormal behavior and require prompt investigation.
 
-| Anomaly                                     | Condition                                                    | Severity                             |
-| ------------------------------------------- | ------------------------------------------------------------ | ------------------------------------ |
-| Sudden TVL drop                             | `TotalAssets_now < TotalAssets_1h_ago * 0.80`                | Critical                             |
-| Extended pause                              | `Paused == true` for more than 24 h                          | High                                 |
-| Withdrawal spike                            | `withdrawal_volume_1h > withdrawal_volume_30d_avg * 3`       | High                                 |
-| Cap saturation                              | Repeated `Error(Contract, #41)` rejections                   | Medium                               |
-| Cooldown violation attempt                  | `rebalance()` called before cooldown elapsed                 | Medium                               |
-| Share price decrease                        | `current_share_price < previous_share_price`                 | Critical                             |
-| `update_total_assets` reporting lower value | New value < stored TotalAssets without `allow_decrease=true` | High                                 |
-| Vault contract upgrade                      | `execute_upgrade()` called                                   | High — requires governance sign-off  |
-| Upgrade scheduled                           | `schedule_upgrade()` called                                  | High — initiates 24h timelock window |
-| Agent update proposed                       | `update_agent()` called                                      | High — initiates 24h timelock window |
+| Anomaly                                     | Condition                                                                           | Severity                             | Rationale                                                                                  |
+| ------------------------------------------- | ----------------------------------------------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------ |
+| Critical Unexplained TVL Drop               | `TotalAssets(k) < TotalAssets(k-1) * 0.95` without matching `WithdrawEvent`         | Critical (P0)                        | Immediate indication of active exploit, flash drain, or severe protocol insolvency       |
+| High Unexplained TVL Drop                   | `TotalAssets(k) < TotalAssets(k-1) * 0.99` without matching `WithdrawEvent`         | High (P1)                            | Unreported loss, sudden bad-debt recognition, or uncontained slippage                      |
+| Share Supply Drift                          | `TotalShares(k) != TotalShares(k-1)` without `DepositEvent` or `WithdrawEvent`      | Critical (P0)                        | Accounting invariant breach; indicates arbitrary state manipulation or storage corruption |
+| Share Price Dilution                        | `(TotalAssets/TotalShares)_now < (TotalAssets/TotalShares)_prev * 0.999`            | Critical (P0)                        | Dilution/inflation attack or unauthorized asset devaluation                                |
+| TVL / Share Invariant Breakdown             | `(TotalShares == 0 && TotalAssets > 0) || (TotalAssets == 0 && TotalShares > 0)`    | Critical (P0)                        | Insolvent state or division-by-zero trap                                                   |
+| Extended pause                              | `Paused == true` for more than 24 h                                                 | High (P1)                            | Stalled operations; potential unhandled incident                                           |
+| Withdrawal spike                            | `withdrawal_volume_1h > withdrawal_volume_30d_avg * 3`                              | High (P1)                            | Coordinated run or insider exit                                                            |
+| Clustered `update_total_assets` Decreases   | `count(AssetsUpdatedEvent{delta < 0}) >= 2 in 1h` OR `sum(decrease_bps[1h]) > 150`  | High (P1)                            | Slow-bleed attack attempting to bypass single-event drop thresholds                        |
+| Sustained 24h Near-Cap Bleed                | `sum(decrease_bps[24h]) > 300` OR `count(near_cap_decrease[24h]) >= 3`             | Critical (P0)                        | Sustained drain approaching single-event bps cap repeatedly                                |
+| Cap saturation                              | Repeated `Error(Contract, #41)` rejections                                          | Medium (P2)                          | Demand exceeding configured TVL limit                                                      |
+| Cooldown violation attempt                  | `rebalance()` called before cooldown elapsed                                        | Medium (P2)                          | Agent timing bug or spam attempt                                                           |
+| Vault contract upgrade                      | `execute_upgrade()` called                                                          | High (P1) — requires sign-off        | Code swap on live contract                                                                 |
+| Upgrade scheduled                           | `schedule_upgrade()` called                                                         | High (P1) — initiates 24h window     | Timelock opened; verify proposal hash against audited release                              |
+| Agent update proposed                       | `update_agent()` called                                                             | High (P1) — initiates 24h window     | Timelock opened; verify proposed agent address                                             |
 
 ---
 
@@ -97,40 +101,108 @@ manual review.
 
 ---
 
-## 4. Alert Examples
+## 4. Anomaly Alert Specifications & Exploit Signatures
 
-```
-ALERT: tvl_drop_20pct
-  condition: get_total_assets() < TotalAssets_1h_ago * 0.80
-  severity: critical
-  action: Page on-call; suspend agent rebalance authority until reviewed
+Concrete alert rules for automated indexers, Prometheus Alertmanager, and monitoring daemons.
 
-ALERT: pause_duration_exceeded
-  condition: Paused == true AND current_ledger > pause_start_ledger + 17280
-  note: 17280 ledgers ≈ 24 h at ~5 s/ledger
-  severity: high
-  action: Notify owner; investigate reason for extended pause
+### 4.1. Exploit & Anomaly Alert Definitions
 
-ALERT: withdrawal_spike
-  condition: withdrawal_volume_1h > withdrawal_volume_30d_avg * 3
-  severity: high
-  action: Review for coordinated exit; check protocol health
+#### ALERT: `unexplained_tvl_drop_critical` (Active Exploit Signature)
+- **Severity**: `Critical` (P0 — Immediate Page)
+- **Condition**: `TotalAssets(ledger_k) < TotalAssets(ledger_{k-1}) * 0.95` without a matching `WithdrawEvent` or `AssetsUpdatedEvent` in that ledger window.
+- **Threshold**: Instantaneous drop `> 5%` within ≤ 1 ledger window (or `> 10%` in 5 minutes).
+- **Rationale**: Vault accounting is invariant-preserving. Total assets can only legally decrease via user withdrawals (`withdraw`/`withdraw_all`) or co-signed yield decreases via `update_total_assets(allow_decrease=true)` (capped by bps). An uncorroborated drop indicates unauthorized token drain, rebalance bridge exploit, or ledger storage corruption.
+- **PromQL Query**:
+  ```promql
+  (
+    (neurowealth_vault_total_assets - neurowealth_vault_total_assets offset 1m) / neurowealth_vault_total_assets offset 1m < -0.05
+  ) unless (
+    increase(neurowealth_vault_withdraw_amount_total[1m]) > 0
+    or
+    increase(neurowealth_vault_assets_updated_decrease_total[1m]) > 0
+  )
+  ```
+- **Horizon / SQL Event Query**:
+  ```sql
+  WITH ledger_delta AS (
+    SELECT ledger, total_assets,
+           LAG(total_assets) OVER (ORDER BY ledger) AS prev_assets
+    FROM vault_ledger_snapshots
+    WHERE contract_id = '$VAULT_CONTRACT_ID'
+  )
+  SELECT d.ledger, d.total_assets, d.prev_assets,
+         ((d.prev_assets - d.total_assets)::float / d.prev_assets) AS drop_ratio
+  FROM ledger_delta d
+  LEFT JOIN contract_events e
+    ON e.contract_id = '$VAULT_CONTRACT_ID'
+   AND e.ledger = d.ledger
+   AND e.topic_0 IN ('withdraw', 'assets')
+  WHERE d.prev_assets > 0
+    AND ((d.prev_assets - d.total_assets)::float / d.prev_assets) > 0.05
+    AND e.id IS NULL;
+  ```
+- **Runbook Action**: **IMMEDIATE EMERGENCY PAUSE**. Execute `emergency_pause()` or `pause()`. Suspend off-chain agent rebalancing authority. Follow [`AGENT_KEY_COMPROMISE_RUNBOOK.md` — Containment](AGENT_KEY_COMPROMISE_RUNBOOK.md#phase-2-containment-t0-to-t30m).
 
-ALERT: tvl_cap_approach
-  condition: get_total_assets() > TvlCap * 0.95
-  severity: medium
-  action: Consider raising cap or preparing user communication
+---
 
-ALERT: share_price_decrease
-  condition: (get_total_assets() / get_total_shares()) < previous_share_price
-  severity: critical
-  action: Halt new deposits; investigate slashing or accounting error
+#### ALERT: `unexplained_tvl_drop_high` (Subtle Loss / Unreported Bad Debt)
+- **Severity**: `High` (P1 — 15m SLA)
+- **Condition**: `TotalAssets(ledger_k) < TotalAssets(ledger_{k-1}) * 0.99` without matching `WithdrawEvent`.
+- **Threshold**: Instantaneous drop `> 1%` in a single ledger absent user withdrawals.
+- **Rationale**: Detects silent protocol-level socialized losses (such as Blend collateral liquidation / bad debt) or abnormal DEX execution slippage exceeding tolerance.
+- **Runbook Action**: Verify external protocol status (`get_current_protocol`, Blend pool reserves). If unexplained, initiate temporary pause and audit transaction logs.
 
-ALERT: rapid_rebalance_attempts
-  condition: rebalance() called more than once within MinRebalanceInterval
-  severity: medium
-  action: Audit agent key; verify no unauthorized rebalance calls
-```
+---
+
+#### ALERT: `share_supply_unaccounted_drift` (Invariant Violation)
+- **Severity**: `Critical` (P0 — Immediate Page)
+- **Condition**: `TotalShares(ledger_k) != TotalShares(ledger_{k-1})` AND `count(DepositEvent) == 0` AND `count(WithdrawEvent) == 0` in `ledger_k`.
+- **Threshold**: `delta(TotalShares) != 0` with zero mint/burn events.
+- **Rationale**: `TotalShares` is the authoritative ledger of vault ownership. Shares can only be minted in `deposit()` and burned in `withdraw()` / `withdraw_all()`. Any supply change without matching events indicates arbitrary storage manipulation, replay attack, or catastrophic VM fault.
+- **PromQL Query**:
+  ```promql
+  (changes(neurowealth_vault_total_shares[1m]) > 0)
+  unless (
+    increase(neurowealth_vault_deposit_events_total[1m]) > 0
+    or
+    increase(neurowealth_vault_withdraw_events_total[1m]) > 0
+  )
+  ```
+- **Runbook Action**: **IMMEDIATE EMERGENCY PAUSE**. Call `emergency_pause()`. Halt all contract interactions and notify the security response team.
+
+---
+
+#### ALERT: `share_price_dilution_spike`
+- **Severity**: `Critical` (P0 — Immediate Page)
+- **Condition**: `(get_total_assets() / get_total_shares())_now < (get_total_assets() / get_total_shares())_prev * 0.999` without an authorized `AssetsUpdatedEvent`.
+- **Threshold**: Share price drop `> 0.1%` in absence of owner-authorized loss report.
+- **Rationale**: Vault share price must be monotonically non-decreasing during normal operation. A sudden share price dilution indicates an inflation/donation attack or unauthorized extraction.
+- **Runbook Action**: Pause contract; audit recent deposit/withdraw sequences in the mempool and transaction traces.
+
+---
+
+#### ALERT: `tvl_share_asymmetry_broken_invariant`
+- **Severity**: `Critical` (P0 — Immediate Page)
+- **Condition**: `(TotalShares == 0 AND TotalAssets > 0) OR (TotalAssets == 0 AND TotalShares > 0)`
+- **Threshold**: Non-zero assets with zero shares, or zero assets with non-zero shares.
+- **Rationale**: Solvency invariant breakdown. Non-zero shares with zero assets causes division-by-zero or zero-value conversions. Non-zero assets with zero shares locks capital permanently.
+- **Runbook Action**: Pause contract; inspect initialization or full-withdrawal flows.
+
+---
+
+### 4.2. Alert-to-Runbook Action Mapping
+
+| Alert Identifier | Severity | Trigger Threshold | Primary Runbook Action | Escalation Target | SLA |
+| ---------------- | -------- | ----------------- | ---------------------- | ----------------- | --- |
+| `unexplained_tvl_drop_critical` | `Critical` (P0) | TVL drop > 5% without `WithdrawEvent` | Call `emergency_pause()`; freeze agent process; audit token balance | Incident Commander & Security Team | < 5 min |
+| `unexplained_tvl_drop_high` | `High` (P1) | TVL drop > 1% without `WithdrawEvent` | Query `get_deployed_assets()`; verify Blend bad-debt cache | Lead DeFi Engineer | < 15 min |
+| `share_supply_unaccounted_drift` | `Critical` (P0) | TotalShares delta with 0 deposit/withdraw events | Call `emergency_pause()`; halt indexers; check node RPC integrity | Protocol Engineering | < 5 min |
+| `share_price_dilution_spike` | `Critical` (P0) | Share price drop > 0.1% without loss event | Call `pause()`; analyze recent contract transaction history | Smart Contract Auditor | < 10 min |
+| `tvl_share_asymmetry_broken_invariant` | `Critical` (P0) | `TotalShares == 0 ^ TotalAssets == 0` | Call `emergency_pause()`; inspect storage keys | Core Tech Lead | < 5 min |
+| `update_total_assets_hourly_decrease_cluster` | `High` (P1) | ≥ 2 decreases in 1h OR > 150 bps in 1h | Throttle agent bot; verify off-chain yield oracle feed | Operations On-Call | < 15 min |
+| `update_total_assets_sustained_bleed_drain` | `Critical` (P0) | > 300 bps loss in 24h OR ≥ 3 near-cap decreases | Call `pause()`; initiate agent key rotation per runbook | Security Lead & Multisig Owners | < 10 min |
+| `pause_duration_exceeded` | `High` (P1) | `Paused == true` for > 17,280 ledgers (24h) | Review post-incident investigation status; plan unpause | Product Operations | < 1 hour |
+| `withdrawal_spike` | `High` (P1) | 1h withdrawal volume > 3x 30-day average | Check pool liquidity; review macro market conditions | Risk Analyst | < 30 min |
 
 ---
 
@@ -293,6 +365,120 @@ stellar contract invoke --id $PROPOSED_DEX_POOL --network mainnet \
 ```
 
 A successful (even zero) response confirms the interface is compatible.
+
+---
+
+## 8. Rate-Based Monitoring & Repeated Near-Cap Decrease Alerts (`update_total_assets`)
+
+The vault contract allows authorized yield updates via `update_total_assets()`. When reporting a loss (`new_total < old_total`), the contract enforces a basis-point cap:
+
+```rust
+let effective_cap_bps = max_decrease_bps.max(100); // floor: 100 bps = 1%
+let max_decrease = old_total * effective_cap_bps / 10_000;
+require(actual_decrease <= max_decrease, VaultError::DecreaseExceedsMaximumAllowedBps);
+```
+
+### Threat Model: Slow-Bleed Extraction
+
+While instantaneous TVL drops (> 5%) trigger P0 anomaly alerts, a compromised agent (or rogue off-chain yield oracle) could attempt to bleed value incrementally. By issuing repeated decreases just below the single-event cap (e.g., 90–99 bps per call every few hours), an attacker could siphon significant vault value over a 24-hour period without tripping single-event thresholds.
+
+Operations daemons must monitor the **rate, frequency, and clustering** of `AssetsUpdatedEvent` decreases.
+
+### Rate-Based Alert Rules
+
+#### ALERT: `update_total_assets_hourly_decrease_cluster`
+- **Severity**: `High` (P1 — 15m SLA)
+- **Condition**: `count(AssetsUpdatedEvent{delta < 0}) >= 2 in 1 hour (720 ledgers)` OR `sum(decrease_bps[1h]) > 150 bps`.
+- **Threshold**: More than 1 loss report in an hour, or cumulative hourly loss > 1.5%.
+- **PromQL Example**:
+  ```promql
+  sum_over_time(
+    (neurowealth_vault_assets_updated_old_total - neurowealth_vault_assets_updated_new_total)
+    / neurowealth_vault_assets_updated_old_total * 10000 [1h]
+  ) > 150
+  or
+  count_over_time(neurowealth_vault_assets_updated_event{direction="decrease"}[1h]) >= 2
+  ```
+- **Horizon / SQL Event Query**:
+  ```sql
+  SELECT
+    count(*) AS decrease_count,
+    sum((old_total - new_total)::float / old_total * 10000) AS total_decrease_bps
+  FROM contract_events
+  WHERE contract_id = '$VAULT_CONTRACT_ID'
+    AND topic_0 = 'assets'
+    AND new_total < old_total
+    AND ledger_sequence >= (current_ledger() - 720)
+  HAVING count(*) >= 2 OR sum((old_total - new_total)::float / old_total * 10000) > 150;
+  ```
+
+---
+
+#### ALERT: `update_total_assets_sustained_bleed_drain`
+- **Severity**: `Critical` (P0 — Immediate Page)
+- **Condition**: Cumulative decrease across all `update_total_assets` calls `> 300 bps (3%)` in 24 hours (17,280 ledgers), OR `count(decreases >= 0.80 * effective_cap_bps) >= 3` in 24 hours.
+- **Threshold**: 24-hour cumulative loss > 3% OR clustering of near-cap decrease events.
+- **PromQL Example**:
+  ```promql
+  sum_over_time(
+    (neurowealth_vault_assets_updated_old_total - neurowealth_vault_assets_updated_new_total)
+    / neurowealth_vault_assets_updated_old_total * 10000 [24h]
+  ) > 300
+  or
+  count_over_time(neurowealth_vault_assets_updated_event{near_cap="true"}[24h]) >= 3
+  ```
+- **Horizon / SQL Event Query**:
+  ```sql
+  SELECT
+    count(*) AS near_cap_count,
+    sum((old_total - new_total)::float / old_total * 10000) AS total_decrease_bps_24h
+  FROM contract_events
+  WHERE contract_id = '$VAULT_CONTRACT_ID'
+    AND topic_0 = 'assets'
+    AND new_total < old_total
+    AND (old_total - new_total)::float / old_total >= (max_decrease_bps * 0.80 / 10000)
+    AND ledger_sequence >= (current_ledger() - 17280)
+  HAVING count(*) >= 3 OR sum((old_total - new_total)::float / old_total * 10000) > 300;
+  ```
+
+---
+
+### Documented Escalation Path & Pause Recommendation
+
+If either near-cap decrease alert fires:
+
+```
+[Near-Cap Decrease Alert Triggered]
+               │
+               ▼
+   1. TRIGGER EMERGENCY PAUSE
+      (Call pause() or emergency_pause())
+               │
+               ▼
+   2. SUSPEND OFF-CHAIN AGENT PROCESS
+      (Kill running bot daemon / revoke signer)
+               │
+               ▼
+   3. INDEPENDENT ON-CHAIN RECONCILIATION
+      (Query live USDC token balance + Blend/DEX pool balances)
+               │
+      ┌────────┴────────┐
+      ▼                 ▼
+[External Loss Valid]  [Discrepancy / Exploitation Detected]
+      │                 │
+      ▼                 ▼
+Document loss event    Initiate Agent Key Rotation via update_agent()
+and resume operations  and escalate to Security Response Team
+```
+
+1. **Immediate Pause Recommendation**: The contract owner / multisig MUST immediately invoke `pause()` or `emergency_pause()`. Pausing freezes user deposits and withdrawals and prevents further asset updates from eroding share value.
+2. **Freeze Off-Chain Agent Bot**: Terminate the agent process container to prevent automated scheduling of further loss updates.
+3. **Audit Underlying Reserves**:
+   - Query `token.balance(vault_contract)`.
+   - Query `BlendPool.get_balance(vault_contract)` and `DexPool.get_balance(vault_contract)`.
+   - Compute `actual_total = idle_usdc + blend_deployed + dex_deployed`.
+   - If `actual_total < total_assets`, verify whether Blend incurred socialized bad debt or DEX pool suffered permanent impermanent loss.
+4. **Key Rotation**: If the reported decreases do not match verifiable on-chain protocol balances, assume agent key compromise. Follow [`AGENT_KEY_COMPROMISE_RUNBOOK.md`](AGENT_KEY_COMPROMISE_RUNBOOK.md) to propose a new agent address via `update_agent()`.
 
 ---
 
