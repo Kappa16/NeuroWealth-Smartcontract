@@ -632,3 +632,175 @@ pub fn mint_and_deposit(
     token_client.mint(user, &amount);
     vault_client.deposit(user, &amount);
 }
+
+// ============================================================================
+// STORAGE-DIFF HARNESS (Issue #596 — adversarial-agent simulation)
+// ============================================================================
+
+/// A snapshot of every publicly observable field of vault state, read back
+/// entirely through the contract's own getter entrypoints (never by reaching
+/// into `env.storage()` directly, since Soroban has no API to enumerate a
+/// contract's storage keys generically).
+///
+/// Used by the adversarial-agent simulation to prove that a call which was
+/// supposed to be rejected produced **zero** observable mutation, and that a
+/// call which is legitimately permitted only touched the fields it is
+/// allowed to.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VaultStateSnapshot {
+    pub owner: Address,
+    pub agent: Address,
+    pub paused: bool,
+    pub tvl_cap: i128,
+    pub user_deposit_cap: i128,
+    pub min_deposit: i128,
+    pub max_deposit: i128,
+    pub rebalance_cooldown: u32,
+    pub max_consecutive_failures: u32,
+    pub consecutive_failures: u32,
+    pub approval_ttl: u32,
+    pub blend_pool: Option<Address>,
+    pub dex_pool: Option<Address>,
+    pub blend_approval_ttl: u32,
+    pub pending_owner: Option<Address>,
+    pub pending_agent_update: Option<(Address, u32)>,
+    pub pending_upgrade: Option<(BytesN<32>, u32)>,
+    pub total_assets: i128,
+    pub total_shares: i128,
+    pub current_protocol: Symbol,
+    pub last_rebalance_ledger: u32,
+    pub version: u32,
+    /// `(address, get_balance, get_shares, get_user_strategy)` for each
+    /// address the caller asked to watch. Kept separate from the top-level
+    /// fields above because it is per-address rather than singleton state.
+    pub watched: std::vec::Vec<(Address, i128, i128, Symbol)>,
+}
+
+/// Reads back the full observable state of `client`'s vault, including
+/// per-address data for every address in `watch`.
+pub fn snapshot_vault_state(
+    client: &NeuroWealthVaultClient,
+    watch: &[Address],
+) -> VaultStateSnapshot {
+    VaultStateSnapshot {
+        owner: client.get_owner(),
+        agent: client.get_agent(),
+        paused: client.is_paused(),
+        tvl_cap: client.get_tvl_cap(),
+        user_deposit_cap: client.get_user_deposit_cap(),
+        min_deposit: client.get_min_deposit(),
+        max_deposit: client.get_max_deposit(),
+        rebalance_cooldown: client.get_rebalance_cooldown(),
+        max_consecutive_failures: client.get_max_consecutive_failures(),
+        consecutive_failures: client.get_consecutive_failures(),
+        approval_ttl: client.get_approval_ttl(),
+        blend_pool: client.get_blend_pool(),
+        dex_pool: client.get_dex_pool(),
+        blend_approval_ttl: client.get_blend_approval_ttl(),
+        pending_owner: client.get_pending_owner(),
+        pending_agent_update: client.get_pending_agent_update(),
+        pending_upgrade: client.get_pending_upgrade(),
+        total_assets: client.get_total_assets(),
+        total_shares: client.get_total_shares(),
+        current_protocol: client.get_current_protocol(),
+        last_rebalance_ledger: client.get_last_rebalance_ledger(),
+        version: client.get_version(),
+        watched: watch
+            .iter()
+            .map(|a| {
+                (
+                    a.clone(),
+                    client.get_balance(a),
+                    client.get_shares(a),
+                    client.get_user_strategy(a),
+                )
+            })
+            .collect(),
+    }
+}
+
+/// Returns the names of every top-level (singleton) field that differs
+/// between two snapshots. Per-address data is reported separately by
+/// [`diff_watched_addresses`] since it is keyed rather than singleton.
+pub fn diff_vault_state(
+    before: &VaultStateSnapshot,
+    after: &VaultStateSnapshot,
+) -> std::vec::Vec<&'static str> {
+    let mut changed = std::vec::Vec::new();
+    macro_rules! check {
+        ($field:ident) => {
+            if before.$field != after.$field {
+                changed.push(stringify!($field));
+            }
+        };
+    }
+    check!(owner);
+    check!(agent);
+    check!(paused);
+    check!(tvl_cap);
+    check!(user_deposit_cap);
+    check!(min_deposit);
+    check!(max_deposit);
+    check!(rebalance_cooldown);
+    check!(max_consecutive_failures);
+    check!(consecutive_failures);
+    check!(approval_ttl);
+    check!(blend_pool);
+    check!(dex_pool);
+    check!(blend_approval_ttl);
+    check!(pending_owner);
+    check!(pending_agent_update);
+    check!(pending_upgrade);
+    check!(total_assets);
+    check!(total_shares);
+    check!(current_protocol);
+    check!(last_rebalance_ledger);
+    check!(version);
+    changed
+}
+
+/// Returns the watched addresses whose `(balance, shares, strategy)` tuple
+/// changed between two snapshots. `before` and `after` must have been taken
+/// with the same `watch` list, in the same order.
+pub fn diff_watched_addresses(
+    before: &VaultStateSnapshot,
+    after: &VaultStateSnapshot,
+) -> std::vec::Vec<Address> {
+    before
+        .watched
+        .iter()
+        .zip(after.watched.iter())
+        .filter(|(b, a)| b.1 != a.1 || b.2 != a.2 || b.3 != a.3)
+        .map(|(b, _)| b.0.clone())
+        .collect()
+}
+
+/// Scopes Soroban authorization to *only* `signer`'s signature for exactly
+/// one contract invocation (`fn_name` + `args` on `contract_id`), with no
+/// sub-invocations authorized either.
+///
+/// This is the tool that makes the "compromised agent" simulation honest: a
+/// real compromised agent controls only its own signing key, never the
+/// owner's. `env.mock_all_auths()` cannot express that distinction because it
+/// authorizes every address unconditionally, so entrypoints that fetch their
+/// authorizing address from storage (`require_is_owner`, `require_is_agent`)
+/// would appear to accept any caller. Scoping the mock to exactly the agent's
+/// address, with no owner entry present, makes those entrypoints fail auth
+/// resolution exactly as they would on a real network.
+pub fn mock_agent_only_auth(
+    env: &Env,
+    contract_id: &Address,
+    agent: &Address,
+    fn_name: &'static str,
+    args: Vec<Val>,
+) {
+    env.mock_auths(&[soroban_sdk::testutils::MockAuth {
+        address: agent,
+        invoke: &soroban_sdk::testutils::MockAuthInvoke {
+            contract: contract_id,
+            fn_name,
+            args,
+            sub_invokes: &[],
+        },
+    }]);
+}

@@ -265,6 +265,9 @@ jobs:
       - name: Verify DataKey::Balance deprecation
         run: bash scripts/check-balance-deprecation.sh
 
+      - name: Verify DataKey docs match lib.rs
+        run: bash scripts/check-data-key-docs.sh
+
   changes:
     name: Detect changes
     runs-on: ubuntu-latest

@@ -168,6 +168,10 @@ pub enum DataKey {
     PendingUpgradeHash,   // WASM hash awaiting timelock execution (#316)
     UpgradeTimelockExpiry,// ledger the pending upgrade unlocks at (#316)
     Deployer,             // deployer address (init only)
+    BlendApprovalTtl,     // legacy Blend-specific approval TTL (backward compat)
+    MaxConsecutiveFailures,// circuit-breaker threshold for failed rebalances (#439)
+    ConsecutiveFailures,  // running count of consecutive failed rebalances (#439)
+    UserSharesIndex,      // append-only index of addresses with non-zero shares (#440)
 }
 ```
 
@@ -223,6 +227,10 @@ When the agent calls `rebalance(protocol="blend", ...)` the vault:
 3. Records `CurrentProtocol = "blend"`.
 
 On withdrawal, if the vault's idle balance is insufficient, it calls `blend_pool.submit()` to withdraw the required amount before transferring to the user.
+
+### Harvest Round Trip
+
+When the AI agent calls `harvest(min_out)`, the vault reads `CurrentProtocol`, withdraws accrued assets from that protocol, and immediately supplies the returned amount back into the same protocol. This compounds yield without changing user shares. If `CurrentProtocol` is `"none"`, harvest is rejected because there is no external position to compound. Successful harvests emit `HarvestEvent` with the active protocol and harvested amount, then update `LastRebalanceLedger` so the cooldown model remains shared with `rebalance()`.
 
 ### Historical: Phase 1 (1:1 accounting — deprecated)
 

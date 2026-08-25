@@ -10,6 +10,7 @@ This changelog is tied to the vault contract `Version` storage value. Each relea
 
 ## [Unreleased]
 <!-- Add entries below. Format: `- Short description (Issue #N).` -->
+- Document `harvest()` in README, ARCHITECTURE, SECURITY, and the state machine; add dedicated idle/deployed asset breakdown tests (Issues #499, #498, #501).
 <!-- If this PR bumps get_version(), note the new Version value here. -->
 - **Defense-in-depth reentrancy test suite (Issue #567):** Added `test_reentrancy_defense.rs` featuring a mock re-entrant token (`ReentrantMockToken`) to assert that hypothetical transfer callbacks cannot corrupt share accounting or execute double-withdrawals under Checks-Effects-Interactions (CEI) ordering.
 - **Threat model & trust boundaries documentation (Issue #563):** Added comprehensive threat model, visual trust-boundary architecture diagram, explicit CAN/CANNOT actor capabilities matrix, external contract call site trust assumption mappings, and alignment verification with `docs/MAINNET_CHECKLIST.md` Sections 1 and 7 in `SECURITY.md`.
