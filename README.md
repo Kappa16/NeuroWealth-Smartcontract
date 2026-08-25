@@ -41,6 +41,12 @@ Conservative — Stablecoin lending on Blend. Low risk, steady 3–6% APY.
 Balanced — Mix of lending + DEX liquidity provision. Medium risk, 6–10% APY.
 Growth — Aggressive multi-protocol deployment. Higher risk, 10–15% APY.
 
+> **Note:** A user's strategy preference (`set_user_strategy` / `get_user_strategy`) is
+> **storage-only** — it has no on-chain effect on `rebalance()` or `deposit()` targeting.
+> The vault pools all funds to a single `CurrentProtocol`. The off-chain AI agent reads
+> the preference and uses it when deciding yield allocation. A user's chosen strategy can
+> therefore diverge from where their share of the pooled funds is actually deployed.
+
 
 ## Tech Stack
 

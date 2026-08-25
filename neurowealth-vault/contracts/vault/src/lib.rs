@@ -1693,6 +1693,13 @@ impl NeuroWealthVault {
     // CORE LIFECYCLE - REBALANCE
     // ==========================================================================
 
+    // NOTE: There is no `harvest()` entrypoint in this contract (Issue #496).
+    // Yield is reported via `update_total_assets()` called by the agent, which
+    // does not involve a separate harvest step. Consequently there is no
+    // `harvest()` failure path to wire into a circuit breaker. If a future
+    // version introduces a `harvest()` function, it should report outcomes to
+    // the circuit-breaker helper alongside `rebalance()`.
+
     /// Rebalances vault funds between yield strategies.
     ///
     /// Only the authorized AI agent can call this function. The agent uses
@@ -2602,6 +2609,14 @@ impl NeuroWealthVault {
     /// Only the user themselves can set their own strategy (requires auth).
     /// The strategy is stored on-chain for the AI agent to read.
     ///
+    /// **Storage-only — no on-chain effect on fund deployment.**
+    /// `rebalance()` and `deposit()` never read `DataKey::UserStrategy`; the vault
+    /// deploys funds pooled to a single `CurrentProtocol` regardless of any
+    /// individual user's selection. The off-chain AI agent is expected to consume
+    /// this preference when deciding yield allocation. A user's chosen strategy can
+    /// therefore diverge from where their share of the pooled funds is actually
+    /// deployed.
+    ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment.
@@ -2651,6 +2666,12 @@ impl NeuroWealthVault {
     /// Returns the user's investment strategy preference.
     ///
     /// If the user has not set a strategy, returns the default ("balanced").
+    ///
+    /// **Storage-only — no on-chain effect on fund deployment.**
+    /// This value is a per-user preference stored for the off-chain AI agent to
+    /// read. `rebalance()` and `deposit()` do not consult it; the vault pools all
+    /// funds to a single `CurrentProtocol`. See [`Self::set_user_strategy`] for
+    /// details.
     ///
     /// # Arguments
     ///
