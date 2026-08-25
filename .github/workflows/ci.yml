@@ -287,6 +287,36 @@ jobs:
               });
             }
 
+  reproducible-build:
+    name: Reproducible Build Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # Two clean uncached builds are expensive, so this runs where an
+    # attestation matters — weekly, on demand, and on pushes to main —
+    # rather than on every PR.
+    if: |
+      github.event_name == 'schedule' ||
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-opt
+        run: cargo install wasm-opt --locked
+
+      # No build caches on purpose: a reproducibility attestation must come
+      # from two genuinely clean builds.
+      - name: Dual build + hash comparison
+        run: bash scripts/check-reproducible-build.sh
+
   readme-check:
     name: README Validation
     runs-on: ubuntu-latest
