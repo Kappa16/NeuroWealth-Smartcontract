@@ -3,6 +3,7 @@ mod test_agent_timelock;
 mod test_approval_ttl;
 mod test_asset_decrease;
 mod test_asset_split;
+mod test_asset_breakdown;
 mod test_auth;
 mod test_balance_deprecation;
 mod test_balance_shares_invariant;
