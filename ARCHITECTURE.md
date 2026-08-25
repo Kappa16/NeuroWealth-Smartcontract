@@ -662,6 +662,128 @@ gates in `tests/test_budget.rs`.
 Cross-contract operations (Blend supply/withdraw) cost roughly 3× a simple
 deposit because each `invoke_contract` carries its own CPU and memory overhead.
 
+## Storage-Griefing Analysis (Issue #598)
+
+This section analyzes whether an attacker can spam many small deposits to
+inflate the vault's persistent/instance storage footprint, raising rent costs
+or CPU/memory budget for honest users. Short answer: `min_deposit` + `TvlCap`
+together bound the number of *distinct new entries* an attacker can create,
+but `UserSharesIndex`'s all-in-one-`Vec`, never-pruned design means the *cost
+of each new entry* rises as the index grows — this is a real, measured effect,
+not just a theoretical one. See below for the numbers.
+
+### What can actually grow
+
+| Storage item | Category | Growth trigger | Pruned on withdrawal? |
+|---|---|---|---|
+| `Shares(Address)` | Persistent, per-user | First deposit from a new address | No — `withdraw`/`withdraw_all` `set` the entry to `0`, they never `remove()` it (see `lib.rs` around the `Shares(user)` writes in `deposit`/`withdraw`/`withdraw_all`) |
+| `UserStrategy(Address)` | Persistent, per-user | First deposit from a new address (defaults to `"balanced"`) | No — never removed |
+| `UserSharesIndex` | **Instance**, single `Vec<Address>` | First deposit from an address with `current_shares == 0` (new *or* returning after a full withdrawal, deduped via `Vec::contains`) | No — append-only by design (see `add_to_user_index`); `get_users_with_shares`'s doc comment calls this out explicitly as the accepted trade-off for issue #440 |
+
+A dust depositor therefore leaves behind three storage artifacts that live
+forever: a zeroed `Shares` entry, a `UserStrategy` entry, and one slot in
+`UserSharesIndex`. None of the three are reclaimed by any code path today.
+
+### Entry-count bound derived from `min_deposit` + `TvlCap`
+
+`require_within_tvl_cap` checks cumulative `TotalAssets`, not the number of
+distinct depositing addresses, and `require_minimum_deposit` only enforces a
+*floor* per transaction (`DEFAULT_MIN_DEPOSIT` = 1_000_000 stroops = 1 USDC).
+Combining the two gives a hard ceiling on how many distinct new
+`Shares`/`UserStrategy`/`UserSharesIndex` entries an attacker can create
+before the vault simply refuses further deposits:
+
+```
+max_new_entries = TvlCap / min_deposit
+```
+
+At the as-deployed defaults (`DEFAULT_TVL_CAP` = 100_000_000_000,
+`DEFAULT_MIN_DEPOSIT` = 1_000_000):
+
+```
+max_new_entries = 100_000_000_000 / 1_000_000 = 100_000 distinct entries
+```
+
+This bound is **owner-adjustable in both directions** — `set_tvl_cap()` and
+`set_deposit_limits()` are both owner-only (`require_is_owner`), so the
+ceiling moves if either configuration value changes. A vault operator raising
+`TvlCap` without also raising `min_deposit` widens this ceiling; that
+trade-off should be considered together, not just for capital efficiency.
+
+An attacker who wants to maximize entry count for minimum locked capital will
+always deposit exactly `min_deposit` per address (any more just wastes their
+own capital without creating additional entries), and — since the index
+dedupes on repeat depositors — will always prefer a **new** address per dust
+deposit over re-depositing from an existing one, since only the former grows
+`UserSharesIndex`.
+
+### Budget impact: cost is not flat as the index grows
+
+`add_to_user_index` reads the *entire* `UserSharesIndex` Vec into memory,
+linear-scans it with `Vec::contains`, and — for a genuinely new address —
+rewrites the whole Vec back to instance storage. Because this runs on every
+first-time (or returning-after-full-withdrawal) deposit, the CPU and memory
+cost of `deposit()` itself grows with the **total number of distinct
+addresses that have ever held shares**, not with the size of the deposit.
+
+`tests/test_storage_griefing_analysis.rs` measures this directly, using the
+same `measure()` budget-reset harness as `tests/test_budget.rs`:
+
+| Scenario | CPU instructions | Memory bytes |
+|---|---|---|
+| `deposit()`, index size 0 → 1 (baseline) | 366,078 | 39,841 |
+| `deposit()`, index size 500 → 501 | 5,077,759 | 2,005,493 |
+
+At only 500 prior distinct depositors, a first-time depositor's `deposit()`
+call already costs **~13.9× the CPU** and **~50× the memory** of the
+empty-index baseline — and both numbers keep climbing linearly as more
+distinct addresses deposit. This is the sharper form of "storage griefing"
+here: the attacker isn't just leaving behind rent-bearing entries, they are
+raising the *compute* cost every future first-time depositor pays, on a
+resource (`Instance` storage, which has no TTL/rent decay at all — see
+[Storage Layout](#storage-layout) above) that never shrinks back down.
+
+At the default 100,000-entry ceiling derived above, linear extrapolation
+puts a single `deposit()` call's cost in the range that would make it
+expensive relative to the `< 5,000,000` CPU / `< 300,000` byte baseline
+`tests/test_budget.rs` treats as normal — plausibly budget-prohibitive well
+before Soroban's hard per-transaction resource ceiling, though the exact
+crossover has not been measured beyond the 500-entry data point above (a
+500,000+ chained-call test is impractical to run in the unit-test simulator;
+this would need a dedicated devnet/loadtest measurement to pin down exactly,
+similar in spirit to `test_blend_devnet.rs`/`test_dex_devnet.rs`).
+
+### Mitigations: current and possible
+
+**Already in place:**
+- `min_deposit` (owner-configurable, default 1 USDC) — makes the attack cost
+  capital proportional to entries created; it is not free.
+- `TvlCap` (owner-configurable) — puts a hard ceiling on total entries
+  regardless of `min_deposit`, as derived above.
+- `get_users_with_shares` pagination already tolerates and documents stale
+  (zero-share) index slots, so downstream indexers are not broken by the
+  index's unbounded growth — only on-chain compute/storage cost is at risk,
+  not off-chain read correctness.
+
+**Not currently implemented (flagged here for maintainers, not attempted in
+this change to avoid an unreviewed contract-logic modification):**
+- **Prune-on-full-withdrawal**: removing an address from `UserSharesIndex`
+  (and its `Shares`/`UserStrategy` entries) when its share balance returns to
+  exactly zero would cap the index at "currently active holders" rather than
+  "all-time holders." This is a real contract-logic change with its own
+  risk surface (e.g., `UserSharesIndex` is a flat `Vec`, so removing a middle
+  element is either an O(n) shift or requires switching to a swap-remove +
+  documented reordering, which would be a breaking change for any indexer
+  relying on positional stability) and is out of scope for this
+  documentation-only issue.
+- **Per-address minimum "stickiness" period or an explicit unstake/prune
+  entrypoint** callable by anyone once a `Shares` entry has been zero for a
+  cooldown window, amortizing cleanup cost onto whoever benefits from it
+  rather than the protocol.
+- **Raising `min_deposit` further** tightens `max_new_entries` immediately
+  with zero contract changes, at the cost of excluding legitimate small
+  depositors — a policy lever, not a code change.
+
 ## Idle vs Deployed Asset Tracking (Issue #321)
 
 The vault distinguishes between two components of its total managed value:
