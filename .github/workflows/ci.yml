@@ -252,8 +252,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Verify access control table accuracy
+      - name: Verify access control table accuracy (spec)
         run: bash scripts/check-access-control.sh
+
+      - name: Verify auth matrix against source (lib.rs)
+        run: python3 scripts/check-auth-matrix.py
 
       - name: Verify DataKey::Balance deprecation
         run: bash scripts/check-balance-deprecation.sh
