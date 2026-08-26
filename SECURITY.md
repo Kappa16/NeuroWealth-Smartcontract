@@ -264,6 +264,19 @@ This register documents every owner-only and agent-only capability, the blast ra
 | set_max_acceptable_mev_loss | yes | - | - | - |
 | submit_apy_prediction | - | yes | - | - |
 | get_apy_prediction | - | - | - | anyone |
+| set_min_withdrawal | yes | - | - | - |
+| get_min_withdrawal | - | - | - | anyone |
+| set_queue_config | yes | - | - | - |
+| get_queue_config | - | - | - | anyone |
+| queue_withdrawal | - | - | yes | - |
+| process_withdrawal_queue | yes | yes | - | - |
+| cancel_withdrawal_request | - | - | yes | - |
+| get_withdrawal_request | - | - | - | anyone |
+| set_max_batch_size | yes | - | - | - |
+| get_max_batch_size | - | - | - | anyone |
+| batch_deposit | yes | yes | - | - |
+| get_user_deposit_timestamp | - | - | - | anyone |
+| get_user_realized_apy | - | - | - | anyone |
 
 ### Emergency Harvest Fallback (Issue #506)
 

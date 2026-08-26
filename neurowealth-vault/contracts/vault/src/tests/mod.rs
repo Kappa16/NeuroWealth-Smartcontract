@@ -65,4 +65,8 @@ mod utils;
 
 mod test_liquidity_mining_rewards;
 mod test_performance_fee;
+mod test_min_withdrawal;
+mod test_withdrawal_queue;
+mod test_batch_deposit;
+mod test_user_apy;
 
