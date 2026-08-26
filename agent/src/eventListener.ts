@@ -1,6 +1,7 @@
 import { SorobanRpc } from '@stellar/stellar-sdk';
 import { Pool } from 'pg';
 import { evaluateYield } from './yieldComparison';
+import { processEventForAlerts } from './alertEngine';
 
 const rpcUrl = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 const server = new SorobanRpc.Server(rpcUrl);
@@ -71,6 +72,10 @@ export async function startEventListener() {
               // TODO: Submit Soroban rebalance transaction here
             }
           }
+
+          // Trigger security alerting system
+          const alertPayload = { type: eventType, amount: 150000 }; // Mocked event payload 
+          await processEventForAlerts(alertPayload);
 
           // Advance the ledger marker
           startLedger = Math.max(startLedger, event.ledger + 1);

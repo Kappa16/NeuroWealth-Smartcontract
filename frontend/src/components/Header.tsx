@@ -3,6 +3,7 @@
 import React from 'react';
 import { Bot, Sparkles } from 'lucide-react';
 import { WalletConnect } from './WalletConnect';
+import { LanguageSwitcher } from './LanguageSwitcher';
 
 interface HeaderProps {
   publicKey: string | null;
@@ -42,8 +43,11 @@ export const Header: React.FC<HeaderProps> = ({ publicKey, onConnect, onDisconne
           <a href="#whatsapp" className="hover:text-emerald-400 transition-colors">WhatsApp Bot</a>
         </nav>
 
-        {/* Wallet Connection */}
-        <WalletConnect publicKey={publicKey} onConnect={onConnect} onDisconnect={onDisconnect} />
+        {/* Wallet Connection & Language */}
+        <div className="flex items-center gap-4">
+          <LanguageSwitcher />
+          <WalletConnect publicKey={publicKey} onConnect={onConnect} onDisconnect={onDisconnect} />
+        </div>
       </div>
     </header>
   );

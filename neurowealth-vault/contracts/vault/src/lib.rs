@@ -669,6 +669,17 @@ pub struct EmergencyPausedEvent {
     pub owner: Address,
 }
 
+#[contracttype]
+pub struct CircuitBreakerTriggeredEvent {
+    pub reason: String,
+    pub threshold_value: i128,
+}
+
+#[contracttype]
+pub struct CircuitBreakerResetEvent {
+    pub owner: Address,
+}
+
 /// Emitted when the TVL cap is updated via `set_tvl_cap`.
 ///
 /// # Topics
@@ -3371,7 +3382,23 @@ impl NeuroWealthVault {
 
         let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
         env.events()
-            .publish((TOPIC_EMERGENCY_PAUSED,), EmergencyPausedEvent { owner });
+            .publish((topics::TOPIC_EMERGENCY_PAUSED,), EmergencyPausedEvent { owner });
+    }
+
+    /// Resets the circuit breaker and unpauses the vault.
+    pub fn reset_circuit_breaker(env: Env, owner: Address) {
+        Self::require_initialized(&env);
+        owner.require_auth();
+        let stored_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
+        Self::require(
+            &env,
+            owner == stored_owner,
+            VaultError::OnlyOwnerCanUnpause,
+        );
+        env.storage().instance().set(&DataKey::ConsecutiveFailures, &0_u32);
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((topics::TOPIC_CIRCUIT_BREAKER_RESET,), CircuitBreakerResetEvent { owner });
     }
 
     /// Owner-callable emergency harvest fallback for agent-key outages.
