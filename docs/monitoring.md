@@ -482,7 +482,165 @@ and resume operations  and escalate to Security Response Team
 
 ---
 
-## 9. Blend Protocol Bad-Debt Monitoring
+## 9. Whale-Exit Concentration Risk (Issue #599)
+
+A single account holding a large share of `TotalShares` introduces two
+distinct risks when it exits: (1) rounding-driven share-price drift for
+remaining users, and (2) a liquidity strain on `withdraw()`/`withdraw_all()`
+if the exit is larger than what's currently idle/available — see
+`docs/PARTIAL_WITHDRAWAL_BEHAVIOR.md` (Issue #600) for the fairness/DoS
+mechanics of that second risk in detail. This section defines the
+concentration metric, alert threshold, and a worked example for the first
+risk.
+
+### Concentration Metric
+
+```
+concentration_pct(user) = (get_shares(user) * 100) / get_total_shares()
+```
+
+Both `get_shares(user)` and `get_total_shares()` are free, read-only getters
+(no TTL side effects — see "Persistent Storage TTL Policy" in
+`ARCHITECTURE.md`), so this metric can be polled continuously without cost or
+on-chain footprint.
+
+### Alert Threshold
+
+```
+ALERT: whale_concentration
+  condition: concentration_pct(user) > 20  (i.e., X = 20%)
+  severity: medium at 20%, high at 35%, critical at 50%+
+  action: Flag the account for exit-impact modeling (below); confirm the
+          vault's idle + readily-withdrawable balance could absorb a full
+          exit from this account without triggering the partial-withdrawal
+          path documented in PARTIAL_WITHDRAWAL_BEHAVIOR.md
+```
+
+`X = 20%` is chosen as the default first-tier threshold because it is the
+point at which a single account's exit starts to be a meaningfully larger
+event than ordinary withdrawal volume (compare to the existing
+`withdrawal_spike` alert in Section 4, which fires at 3× the 30-day average
+volume in aggregate — a account above 20% concentration can trivially trigger
+that alert alone). Operators with a smaller or more concentrated user base
+may reasonably lower this threshold; operators with many similarly-sized
+holders may raise it. There is no on-chain enforcement of this threshold —
+`UserDepositCap` (owner-configurable, see `set_user_deposit_cap()`) is the
+only contract-level lever that bounds how concentrated a single account *can*
+become, and it bounds absolute USDC exposure, not percentage-of-pool, so it
+does not by itself prevent concentration from rising as other users withdraw
+even if no single deposit grows.
+
+### Why concentration matters: rounding drift on exit
+
+`convert_to_assets_internal` (the function backing `withdraw`,
+`withdraw_all`, and `get_balance`) computes:
+
+```
+usdc_owed = floor(shares * TotalAssets / TotalShares)
+```
+
+Integer division **floors** — it always rounds toward zero, never up. Every
+withdrawal therefore leaves behind a small remainder (at most
+`TotalShares - 1` units of rounding dust, in the worst case) that is not
+transferred to the withdrawing user. That dust remains in `TotalAssets`
+while `TotalShares` has already been reduced by the exact number of shares
+burned — which means the *effective* share price for everyone remaining
+(`TotalAssets / TotalShares`) ticks up very slightly after every withdrawal,
+including a whale's.
+
+This is not a bug — it is the standard "no value leaks, all rounding favors
+existing holders" pattern the vault's inflation-attack defenses rely on (see
+`ARCHITECTURE.md`'s Rounding Rules and Overflow Safety sections). But the
+*size* of the one-time rounding dust from a single exit scales with the size
+of that exit: a whale liquidating a large share position in one transaction
+concentrates what would otherwise be many small holders' worth of rounding
+dust into a single event, which is the concrete mechanism by which "a
+dominant depositor exiting can shift share price for remaining users" (as
+the issue puts it) — it's a real, if small and directionally-favorable-to-
+remaining-holders, effect worth being able to explain when a dashboard shows
+a share-price tick right after a large withdrawal.
+
+### Worked Example
+
+Assume:
+- `TotalShares = 1,000,000` (1:1 with USDC at initial deposit, before yield)
+- `TotalAssets = 1,050,000` USDC (5% yield accrued since launch)
+- Whale holds `250,000` shares — `concentration_pct = 25%`, above the 20%
+  alert threshold
+
+Whale calls `withdraw_all()`:
+
+```
+entitled_amount = floor(250,000 * 1,050,000 / 1,000,000)
+                = floor(262,500,000,000 / 1,000,000)
+                = floor(262,500.0)
+                = 262,500 USDC   (exact — no rounding loss in this case
+                                   because 250,000 * 1,050,000 divides evenly
+                                   by 1,000,000)
+```
+
+Post-exit state (assuming full liquidity was available, no partial-fill
+path triggered):
+
+```
+TotalShares = 1,000,000 - 250,000 = 750,000
+TotalAssets = 1,050,000 - 262,500 = 787,500
+new_share_price = 787,500 / 750,000 = 1.05   (unchanged — confirms no value
+                                                was created or destroyed by
+                                                a clean-dividing exit)
+```
+
+Now the same example with a whale holding a share count that does **not**
+divide evenly — `250,001` shares (`concentration_pct ≈ 25.0001%`):
+
+```
+entitled_amount = floor(250,001 * 1,050,000 / 1,000,000)
+                = floor(262,501,050,000 / 1,000,000)
+                = floor(262,501.05)
+                = 262,501 USDC   (0.05 of a unit lost to rounding — this
+                                   example uses whole-USDC numbers for
+                                   readability; real deposits are denominated
+                                   in stroops, 1 USDC = 1,000,000 stroops per
+                                   DEFAULT_MIN_DEPOSIT, so scale accordingly)
+
+TotalShares = 1,000,000 - 250,001 = 749,999
+TotalAssets = 1,050,000 - 262,501 = 787,499
+new_share_price = 787,499 / 749,999 ≈ 1.05000007   (a ~0.000007% uptick versus
+                                                      the pre-exit 1.05 price,
+                                                      entirely from the 0.05
+                                                      units of rounding dust
+                                                      now redistributed pro-
+                                                      rata across the smaller
+                                                      remaining TotalShares)
+```
+
+The uptick is real but economically negligible at this scale — it only
+becomes a monitoring concern when a whale's exit is large enough, or
+`TotalShares` remaining afterward is small enough, that the same
+floor-rounding math produces a visible share-price jump an off-chain
+dashboard or the AI agent's yield reporting might otherwise misattribute to
+an actual yield event. **Practical guidance**: when `share_price_decrease` or
+an unexpected `share_price` jump alert (Section 4) fires within the same
+ledger window as a `withdraw()`/`withdraw_all()` event from a flagged
+whale-concentration account, attribute it to rounding first and confirm via
+the arithmetic above before escalating as a solvency concern.
+
+### Liquidity Strain on Exit
+
+Separately from rounding, a whale's exit is a single large withdrawal
+request against whatever liquidity is idle or immediately available from the
+active protocol at that moment. If `entitled_amount` exceeds available
+liquidity, the whale receives a partial fill under the exact mechanics in
+`docs/PARTIAL_WITHDRAWAL_BEHAVIOR.md` — there is no special-cased handling
+for large withdrawals in the contract. Operationally, this means a flagged
+whale account should be cross-referenced against current idle balance
+(`get_idle_balance()`) and deployed assets (`get_deployed_assets()`) before
+any planned/announced exit, since the vault itself has no way to reserve
+liquidity ahead of time for a specific account's future withdrawal.
+
+---
+
+## 10. Blend Protocol Bad-Debt Monitoring
 
 When funds are deployed to Blend Protocol, the vault becomes sensitive to **socialized bad-debt events**. These occur when Blend recognizes collateral liquidations or defaults, reducing the total assets across all suppliers pro-rata.
 
@@ -522,7 +680,7 @@ echo "$RATE_NOW" > .blend-rate-cache
 
 ---
 
-## 10. Ledger-to-Time Conversion Reference
+## 11. Ledger-to-Time Conversion Reference
 
 Soroban does not expose wall-clock time natively. Use ledger sequence as a proxy.
 
@@ -540,7 +698,7 @@ off-chain monitoring.
 
 ---
 
-## 11. Rebalance APY Deviation & Frequency Monitoring (Rogue-Agent Detection)
+## 12. Rebalance APY Deviation & Frequency Monitoring (Rogue-Agent Detection)
 
 The agent key is the only address that can call `rebalance()`. A compromised or
 malfunctioning agent will usually reveal itself in one of two ways before funds
