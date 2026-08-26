@@ -60,3 +60,7 @@ mod test_users_with_shares;
 mod test_withdraw;
 mod test_yield;
 mod utils;
+
+mod test_liquidity_mining_rewards;
+mod test_performance_fee;
+
