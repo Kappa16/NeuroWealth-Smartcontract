@@ -96,3 +96,15 @@ pub const TOPIC_HARVEST: Symbol = symbol_short!("harvest");
 /// Topic for `EmergencyHarvestEvent`, published when the owner triggers an
 /// emergency harvest fallback during an agent-key outage or rotation.
 pub const TOPIC_EMERGENCY_HARVEST: Symbol = symbol_short!("em_harv");
+/// Topic 0 for `SharesMigratedEvent`; topic 1 is the migrating user's `Address`.
+pub const TOPIC_MIGRATE: Symbol = symbol_short!("migrate");
+/// Topic for `MigrationTargetUpdatedEvent`, published when the owner sets/updates migration target.
+pub const TOPIC_MIGRATION_TARGET_UPDATED: Symbol = symbol_short!("mig_tgt");
+/// Topic for `MigrationPausedEvent`, published when migration is paused/unpaused.
+pub const TOPIC_MIGRATION_PAUSED: Symbol = symbol_short!("mig_pse");
+/// Topic 0 for `SharesLockedEvent`; topic 1 is the user's `Address`.
+pub const TOPIC_SHARES_LOCKED: Symbol = symbol_short!("lock");
+/// Topic 0 for `SharesUnlockedEvent`; topic 1 is the user's `Address`.
+pub const TOPIC_SHARES_UNLOCKED: Symbol = symbol_short!("unlock");
+/// Topic 0 for `EmergencyWithdrawalEvent`; topic 1 is the withdrawing user's `Address`.
+pub const TOPIC_EMERGENCY_WITHDRAWAL: Symbol = symbol_short!("em_wd");

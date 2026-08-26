@@ -967,6 +967,130 @@ The `NeuroWealthVault` contract interacts with three categories of external smar
 - **Failure Trigger**: Compromised or malfunctioning AI Agent reports an artificially inflated asset balance or an un-authorized loss.
 - **Handling**:
   - *Inflation*: Blocked by solvency verification (`total_available >= new_total`) where `total_available` is the sum of idle USDC balance and verified protocol balances.
+
+---
+
+## Storage Updates for New Features (#635, #636, #637)
+
+### New Instance Storage Keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `MigrationTarget` | Address | Target vault address for user migration (#637) |
+| `MigrationPaused` | bool | Independent pause state for migration operations (#637) |
+
+### New Persistent Storage Keys
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `LockedShares(Address)` | i128 | User's locked shares for boosted APY (#636) |
+| `LockExpiry(Address)` | u32 | Ledger when user's locked shares can be unlocked (#636) |
+
+### Updated Access Patterns
+
+| Key | Category | Writers | Readers | TTL |
+|-----|----------|---------|---------|-----|
+| `MigrationTarget` | Instance | Owner (set_migration_target) | Everyone | None |
+| `MigrationPaused` | Instance | Owner (set_migration_paused) | Everyone | None |
+| `LockedShares(user)` | Persistent | User (lock_shares, unlock_shares) | User, get_locked_shares | Automatic on write |
+| `LockExpiry(user)` | Persistent | User (lock_shares) | User, unlock_shares, get_locked_shares | Automatic on write |
+
+### Storage Key Updates
+
+**New Instance Storage Keys (lines 39-40):**
+```markdown
+| `MigrationTarget` | Address | Target vault address for user migration (#637) |
+| `MigrationPaused` | bool | Independent pause state for migration operations (#637) |
+```
+
+**New Persistent Storage Keys (lines 50-51):**
+```markdown
+| `LockedShares(Address)` | i128 | User's locked shares for boosted APY (#636) |
+| `LockExpiry(Address)` | u32 | Ledger when user's locked shares can be unlocked (#636) |
+```
+
+---
+
+## New Features (Issues #635, #636, #637)
+
+### Emergency Withdrawal (#635)
+
+**Purpose**: Allows users to withdraw funds even when the vault is paused, providing a safety mechanism during extended pauses or governance disputes.
+
+**Key Features**:
+- Works when vault is paused (unlike regular withdrawals)
+- Requires user authentication (only their own funds)
+- Deducts from idle balance first, then from protocol if needed
+- Emits `EmergencyWithdrawalEvent` for audit trail
+- Follows same rounding rules as regular withdrawals
+
+**Storage**: No new storage keys (uses existing pause state)
+
+**Events**: `EmergencyWithdrawalEvent` (topic `"em_wd"`)
+
+**Security Considerations**:
+- Only available when vault is paused
+- Users can only withdraw their own funds
+- Does not affect rebalance or admin operations
+- Maintains same rounding and accounting rules as regular withdrawals
+
+### Share Locking for Boosted APY (#636)
+
+**Purpose**: Allows users to voluntarily lock shares for configurable periods in exchange for boosted APY, similar to ve-tokenomics patterns.
+
+**Key Features**:
+- Three lock duration tiers: 30 days (1.1x), 90 days (1.25x), 180 days (1.5x)
+- Locked shares cannot be withdrawn until lock period expires
+- Withdraw functions respect lock state (only unlocked shares can be withdrawn)
+- Boost multiplier affects share price calculation
+- Users can unlock shares after expiry
+
+**Storage**:
+- `LockedShares(Address)`: Number of shares locked by user
+- `LockExpiry(Address)`: Ledger when locked shares can be unlocked
+
+**Events**:
+- `SharesLockedEvent` (topic `"lock"`)
+- `SharesUnlockedEvent` (topic `"unlock"`)
+
+**Security Considerations**:
+- Lock enforced at contract level, not just UI
+- Withdraw functions check lock state before processing
+- Early withdrawal attempts fail with proper error codes
+- Lock expiry checked at ledger level (not time-based)
+
+### Vault Migration (#637)
+
+**Purpose**: Enables trustless user migration from old vault to new vault during contract upgrades, preserving share value through exchange rate conversion.
+
+**Key Features**:
+- Owner sets migration target address
+- Users can migrate shares independently
+- Exchange rate preserved through conversion calculation
+- Migration can be paused independently of main vault pause
+- Comprehensive event logging for audit trails
+
+**Storage**:
+- `MigrationTarget`: Address of new vault contract
+- `MigrationPaused`: Independent pause state for migration
+
+**Events**:
+- `SharesMigratedEvent` (topic `"migrate"`)
+- `MigrationTargetUpdatedEvent` (topic `"mig_tgt"`)
+- `MigrationPausedEvent` (topic `"mig_pse"`)
+
+**Security Considerations**:
+- Migration target must be owner-set (prevents malicious contracts)
+- Migration can be paused independently for safety
+- Exchange rate calculated at migration time to preserve value
+- User authentication required for migration
+- Full event logging enables audit trails
+
+**Integration with Traditional Upgrades**:
+- Can complement storage migrations or replace them
+- Users maintain control over their funds during upgrades
+- Provides flexibility for different upgrade scenarios
+- Old vault remains operational as fallback
   - *Loss*: Decreases require owner co-signatures (`require_is_owner`) and are hard-capped at `max_decrease_bps` (minimum cap floor 100 bps / 1%, default 10%).
 - **Verification**: Covered by [`test_asset_decrease.rs`](neurowealth-vault/contracts/vault/src/tests/test_asset_decrease.rs) and [`test_update_total_assets_blend.rs`](neurowealth-vault/contracts/vault/src/tests/test_update_total_assets_blend.rs).
 
