@@ -37,8 +37,10 @@ stateDiagram-v2
         Idle --> DEX   : rebalance("dex", ...)
         Blend --> Idle : rebalance("none", ...)
         Blend --> DEX  : rebalance("dex", ...) — exits Blend first
+        Blend --> Blend : harvest(min_out) — withdraws and re-supplies
         DEX --> Idle   : rebalance("none", ...)
         DEX --> Blend  : rebalance("blend", ...) — exits DEX first
+        DEX --> DEX     : harvest(min_out) — withdraws and re-supplies
     }
 ```
 
@@ -83,7 +85,7 @@ deployed to a configured DEX liquidity pool. Rebalancing to `"blend"` or
 `"none"` exits the DEX position first (remove_liquidity), then enters the
 target protocol. A failed DEX exit leaves `CurrentProtocol` unchanged.
 
-**Blocked actions:** None — all user and admin operations available.
+**Blocked actions:** None — all user and admin operations available. The AI agent may also call `harvest(min_out)` while `CurrentProtocol` is `"blend"` or `"dex"`; the call exits and re-enters the same protocol and leaves `CurrentProtocol` unchanged.
 
 ---
 

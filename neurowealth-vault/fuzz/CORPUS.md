@@ -51,6 +51,17 @@ This directory contains fuzz testing harnesses for the NeuroWealth Vault contrac
 3. Cancellation is always allowed while a proposal is pending
 4. Scheduled `effective_ledger` is always in the future
 
+### 6. `harvest_sequence` (Issue #671)
+**Purpose**: Extends `deposit_withdraw_sequence` to interleave `harvest()` and `rebalance()` calls, ensuring the harvest function handles arbitrary inputs without panics or state corruption under adversarial sequences.
+**Input format**: 4-byte chunks where:
+- Byte 0: Operation selector (0=deposit, 1=withdraw, 2=harvest, 3=rebalance)
+- Bytes 1-2: Amount/min_out selector (u16 LE)
+- Byte 3: Target protocol index for rebalance (0=none, 1=blend, 2=dex)
+**Invariants checked**:
+1. Standard vault invariants after every successful operation (shares/balances non-negative, user ≤ total)
+2. `TotalAssets` does not decrease after a `harvest()` call (yield can only be non-negative)
+3. No unexpected panics from any harvest code path
+
 ## Running Fuzz Tests
 
 ```bash

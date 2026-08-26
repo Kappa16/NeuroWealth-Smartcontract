@@ -21,7 +21,7 @@
 use libfuzzer_sys::fuzz_target;
 use neurowealth_vault::{NeuroWealthVault, NeuroWealthVaultClient};
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{Address, BytesN, Env, symbol_short};
+use soroban_sdk::{symbol_short, Address, BytesN, Env};
 
 mod token {
     use soroban_sdk::{contract, contractimpl, contracttype, Address, Env};

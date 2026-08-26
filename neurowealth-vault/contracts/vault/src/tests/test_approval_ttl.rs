@@ -235,6 +235,55 @@ fn test_set_approval_ttl_rejected_call_emits_no_event() {
     );
 }
 
+/// Test that setting Blend approval TTL to 0 while funds are deployed does not
+/// strand user assets. This verifies that emergency withdrawal is still possible
+/// even when the approval TTL is set to zero (Issue #572).
+#[test]
+fn test_set_blend_approval_ttl_zero_with_deployed_funds_allows_withdrawal() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, usdc_token, blend_pool) =
+        setup_vault_with_token_and_blend(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+
+    client.set_blend_pool(&owner, &blend_pool);
+
+    // Set initial approval TTL to a valid value
+    client.set_blend_approval_ttl(&owner, &10_000_u32);
+
+    // Deposit funds and deploy them to Blend via rebalance
+    let user = Address::generate(&env);
+    mint_and_deposit(&env, &client, &usdc_token, &user, 10_000_000_i128);
+    client.rebalance(&symbol_short!("blend"), &5_000_000_i128, &0_i128);
+
+    // Verify funds are deployed (vault has less idle USDC)
+    let vault_idle_balance = token_client.balance(&contract_id);
+    assert!(
+        vault_idle_balance < 10_000_000_i128,
+        "funds should be deployed to Blend"
+    );
+
+    // Set Blend approval TTL to 0 while funds are deployed
+    client.set_blend_approval_ttl(&owner, &0_u32);
+    assert_eq!(client.get_blend_approval_ttl(), 0, "TTL should be set to 0");
+
+    // Attempt to withdraw - this should succeed to prevent asset stranding
+    // The vault should handle the expired approval gracefully by refreshing approvals
+    let withdraw_amount = 1_000_000_i128;
+    let user_balance_before = token_client.balance(&user);
+
+    client.withdraw(&user, &withdraw_amount);
+
+    let user_balance_after = token_client.balance(&user);
+    assert_eq!(
+        user_balance_after - user_balance_before,
+        withdraw_amount,
+        "user should receive the withdrawn amount even with TTL=0"
+    );
+}
+
 // ─── DEX supply path (#341) ─────────────────────────────────────────────────
 //
 // The DEX supply path (`rebalance("dex", ..)` → `add_liquidity`) approves the

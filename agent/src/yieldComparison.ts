@@ -1,78 +1,57 @@
-export async function fetchBlendApy(): Promise<number> {
-  // TODO: Implement on-chain query to Blend protocol
-  // Returning mock APY of 6.5%
-  return 6.5; 
+export interface ProtocolYieldData {
+  protocolId: string;
+  name: string;
+  type: 'blend' | 'dex_lp' | 'other';
+  currentApy: number; // e.g. 0.085 for 8.5%
+  historicalApy7d: number;
+  historicalApy30d: number;
+  tvlUsdc: number;
+  volatility: number; // annualized volatility e.g. 0.02
+  riskScore: number;  // 1-100 from risk scoring engine
 }
 
-export async function fetchDexApy(): Promise<number> {
-  // TODO: Implement query to DEX liquidity pools
-  // Returning mock APY of 8.2%
-  return 8.2; 
+export interface YieldOpportunity {
+  protocolId: string;
+  name: string;
+  netApy: number;
+  riskAdjustedScore: number;
+  recommendedAllocationPercent: number;
 }
 
-export interface RebalanceDecision {
-  shouldRebalance: boolean;
-  targetProtocol: 'blend' | 'dex' | 'none';
-  expectedApy: number;
-}
+export class YieldComparisonEngine {
+  private readonly minImprovementThreshold: number;
+  private readonly riskFreeRate: number;
 
-/**
- * Core yield comparison engine.
- * Evaluates APY across integrated protocols and decides when to rebalance
- * based on the >0.5% improvement threshold.
- */
-export async function evaluateYield(
-  userStrategy: 'conservative' | 'balanced' | 'growth',
-  currentProtocol: 'blend' | 'dex' | 'none',
-  currentApy: number
-): Promise<RebalanceDecision> {
-  try {
-    const blendApy = await fetchBlendApy();
-    const dexApy = await fetchDexApy();
-    
-    let bestProtocol: 'blend' | 'dex' | 'none' = 'none';
-    let bestApy = 0;
+  constructor(minImprovementThreshold = 0.005, riskFreeRate = 0.04) {
+    this.minImprovementThreshold = minImprovementThreshold;
+    this.riskFreeRate = riskFreeRate;
+  }
 
-    // Strategy constraints
-    // Conservative: Stablecoin lending on Blend (low risk)
-    // Balanced/Growth: Can use DEX if higher yield
-    if (userStrategy === 'conservative') {
-      bestProtocol = 'blend';
-      bestApy = blendApy;
-    } else {
-      if (dexApy > blendApy) {
-        bestProtocol = 'dex';
-        bestApy = dexApy;
-      } else {
-        bestProtocol = 'blend';
-        bestApy = blendApy;
-      }
-    }
+  public calculateSharpeRatio(apy: number, volatility: number): number {
+    if (volatility <= 0) return apy / 0.01;
+    return (apy - this.riskFreeRate) / volatility;
+  }
 
-    // >0.5% (50 bps) improvement threshold logic
-    const apyImprovement = bestApy - currentApy;
-    
-    if (bestProtocol !== currentProtocol && apyImprovement > 0.5) {
-      console.log(`Rebalance triggered! Improvement of ${apyImprovement.toFixed(2)}% found. Moving from ${currentProtocol} to ${bestProtocol}.`);
-      return {
-        shouldRebalance: true,
-        targetProtocol: bestProtocol,
-        expectedApy: bestApy,
-      };
-    }
+  public rankOpportunities(protocols: ProtocolYieldData[]): YieldOpportunity[] {
+    return protocols
+      .map((p) => {
+        const sharpe = this.calculateSharpeRatio(p.currentApy, p.volatility);
+        // Risk-adjusted metric combines sharpe with inverse risk penalty
+        const riskPenalty = (100 - p.riskScore) / 100;
+        const riskAdjustedScore = sharpe * riskPenalty;
 
-    return {
-      shouldRebalance: false,
-      targetProtocol: currentProtocol,
-      expectedApy: currentApy,
-    };
-  } catch (error) {
-    console.error("Error evaluating yield:", error);
-    // Fail gracefully: don't rebalance on stale or failed data
-    return {
-      shouldRebalance: false,
-      targetProtocol: currentProtocol,
-      expectedApy: currentApy,
-    };
+        return {
+          protocolId: p.protocolId,
+          name: p.name,
+          netApy: p.currentApy,
+          riskAdjustedScore: Math.round(riskAdjustedScore * 100) / 100,
+          recommendedAllocationPercent: 0,
+        };
+      })
+      .sort((a, b) => b.riskAdjustedScore - a.riskAdjustedScore);
+  }
+
+  public shouldRebalance(currentApy: number, targetApy: number): boolean {
+    return targetApy - currentApy >= this.minImprovementThreshold;
   }
 }

@@ -1,7 +1,7 @@
 //! Tests for deposit limits and caps
 
 use super::utils::*;
-use crate::{DataKey, VaultError, DEFAULT_MIN_DEPOSIT, MAX_DEPOSIT_CEILING};
+use crate::{DataKey, DEFAULT_MIN_DEPOSIT, MAX_DEPOSIT_CEILING};
 use soroban_sdk::{testutils::Address as _, Address, Env};
 
 #[test]
@@ -536,7 +536,7 @@ fn test_lowering_user_deposit_cap_below_current_deposit_blocks_new_deposits() {
     let result = client.try_deposit(&user_a, &deposit_100);
     assert_eq!(
         result,
-        Err(Ok(VaultError::ExceedsUserDepositCap)),
+        Err(Ok(soroban_sdk::Error::from_contract_error(40))),
         "New deposit exceeding lowered cap must be blocked with VaultError::ExceedsUserDepositCap (#40)"
     );
 
@@ -567,8 +567,7 @@ fn test_lowering_user_deposit_cap_below_current_deposit_blocks_new_deposits() {
     let result_b = client.try_deposit(&user_b, &deposit_300);
     assert_eq!(
         result_b,
-        Err(Ok(VaultError::ExceedsUserDepositCap)),
+        Err(Ok(soroban_sdk::Error::from_contract_error(40))),
         "User B deposit exceeding lowered cap must be blocked with VaultError::ExceedsUserDepositCap (#40)"
     );
 }
-

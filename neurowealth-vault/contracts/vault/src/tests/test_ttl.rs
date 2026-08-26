@@ -131,7 +131,10 @@ fn test_expired_entry_is_treated_as_nonexistent() {
     let user = Address::generate(&env);
 
     mint_and_deposit(&env, &client, &usdc_token, &user, 5_000_000);
-    assert!(client.get_shares(&user) > 0, "shares must exist before expiry");
+    assert!(
+        client.get_shares(&user) > 0,
+        "shares must exist before expiry"
+    );
 
     // Simulate TTL expiry by removing the persistent entry directly
     env.as_contract(&contract_id, || {
@@ -140,8 +143,15 @@ fn test_expired_entry_is_treated_as_nonexistent() {
             .remove(&DataKey::Shares(user.clone()))
     });
 
-    assert_eq!(client.get_shares(&user), 0, "expired entry: get_shares must return 0");
-    assert!(!client.touch_user_ttl(&user), "expired entry: touch_user_ttl must return false");
+    assert_eq!(
+        client.get_shares(&user),
+        0,
+        "expired entry: get_shares must return 0"
+    );
+    assert!(
+        !client.touch_user_ttl(&user),
+        "expired entry: touch_user_ttl must return false"
+    );
 }
 
 /// Restoration path: a Shares entry with TTL below threshold (100) is extended
@@ -168,20 +178,30 @@ fn test_touch_restores_ttl_when_below_threshold() {
     });
 
     let ttl_before = env.as_contract(&contract_id, || {
-        env.storage().persistent().get_ttl(&DataKey::Shares(user.clone()))
+        env.storage()
+            .persistent()
+            .get_ttl(&DataKey::Shares(user.clone()))
     });
 
-    assert!(client.touch_user_ttl(&user), "touch must return true when entry exists");
+    assert!(
+        client.touch_user_ttl(&user),
+        "touch must return true when entry exists"
+    );
 
     let ttl_after = env.as_contract(&contract_id, || {
-        env.storage().persistent().get_ttl(&DataKey::Shares(user.clone()))
+        env.storage()
+            .persistent()
+            .get_ttl(&DataKey::Shares(user.clone()))
     });
 
     assert!(
         ttl_after > ttl_before,
         "TTL must increase from {ttl_before} after touch (restored from insufficient headroom)"
     );
-    assert!(ttl_after >= 100, "TTL must reach at least USER_SHARES_TTL_EXTEND_TO (100)");
+    assert!(
+        ttl_after >= 100,
+        "TTL must reach at least USER_SHARES_TTL_EXTEND_TO (100)"
+    );
 }
 
 /// Boundary — exactly at threshold: TTL == 100 is NOT below threshold
@@ -207,13 +227,17 @@ fn test_touch_does_not_extend_when_ttl_equals_threshold() {
     });
 
     let ttl_at_threshold = env.as_contract(&contract_id, || {
-        env.storage().persistent().get_ttl(&DataKey::Shares(user.clone()))
+        env.storage()
+            .persistent()
+            .get_ttl(&DataKey::Shares(user.clone()))
     });
 
     assert!(client.touch_user_ttl(&user));
 
     let ttl_after = env.as_contract(&contract_id, || {
-        env.storage().persistent().get_ttl(&DataKey::Shares(user.clone()))
+        env.storage()
+            .persistent()
+            .get_ttl(&DataKey::Shares(user.clone()))
     });
 
     // 100 < 100 is false → no extension
@@ -240,23 +264,33 @@ fn test_touch_extends_when_ttl_is_one_below_threshold() {
     env.as_contract(&contract_id, || {
         env.storage().persistent().extend_ttl(
             &DataKey::Shares(user.clone()),
-            0,  // always act
+            0, // always act
             99,
         )
     });
 
     let ttl_before = env.as_contract(&contract_id, || {
-        env.storage().persistent().get_ttl(&DataKey::Shares(user.clone()))
+        env.storage()
+            .persistent()
+            .get_ttl(&DataKey::Shares(user.clone()))
     });
 
     assert!(client.touch_user_ttl(&user));
 
     let ttl_after = env.as_contract(&contract_id, || {
-        env.storage().persistent().get_ttl(&DataKey::Shares(user.clone()))
+        env.storage()
+            .persistent()
+            .get_ttl(&DataKey::Shares(user.clone()))
     });
 
-    assert!(ttl_after > ttl_before, "TTL of 99 (below threshold) must be extended by touch");
-    assert!(ttl_after >= 100, "TTL must reach at least USER_SHARES_TTL_EXTEND_TO (100)");
+    assert!(
+        ttl_after > ttl_before,
+        "TTL of 99 (below threshold) must be extended by touch"
+    );
+    assert!(
+        ttl_after >= 100,
+        "TTL must reach at least USER_SHARES_TTL_EXTEND_TO (100)"
+    );
 }
 
 /// Multiple successive touch_user_ttl calls keep the entry alive without error.
@@ -273,9 +307,14 @@ fn test_multiple_touch_calls_keep_entry_alive() {
     mint_and_deposit(&env, &client, &usdc_token, &user, 5_000_000);
 
     for i in 0..5 {
-        assert!(client.touch_user_ttl(&user), "touch call {i} must return true");
+        assert!(
+            client.touch_user_ttl(&user),
+            "touch call {i} must return true"
+        );
         let ttl = env.as_contract(&contract_id, || {
-            env.storage().persistent().get_ttl(&DataKey::Shares(user.clone()))
+            env.storage()
+                .persistent()
+                .get_ttl(&DataKey::Shares(user.clone()))
         });
         assert!(ttl > 0, "TTL must remain positive after touch {i}");
     }
@@ -295,7 +334,11 @@ fn test_touch_after_full_withdrawal_does_not_panic() {
     mint_and_deposit(&env, &client, &usdc_token, &user, 5_000_000);
     client.withdraw_all(&user);
 
-    assert_eq!(client.get_shares(&user), 0, "shares must be 0 after withdraw_all");
+    assert_eq!(
+        client.get_shares(&user),
+        0,
+        "shares must be 0 after withdraw_all"
+    );
     // Must not panic regardless of whether the key is retained or removed
     let _touched = client.touch_user_ttl(&user);
 }

@@ -41,6 +41,12 @@ Conservative — Stablecoin lending on Blend. Low risk, steady 3–6% APY.
 Balanced — Mix of lending + DEX liquidity provision. Medium risk, 6–10% APY.
 Growth — Aggressive multi-protocol deployment. Higher risk, 10–15% APY.
 
+> **Note:** A user's strategy preference (`set_user_strategy` / `get_user_strategy`) is
+> **storage-only** — it has no on-chain effect on `rebalance()` or `deposit()` targeting.
+> The vault pools all funds to a single `CurrentProtocol`. The off-chain AI agent reads
+> the preference and uses it when deciding yield allocation. A user's chosen strategy can
+> therefore diverge from where their share of the pooled funds is actually deployed.
+
 
 ## Tech Stack
 
@@ -210,10 +216,13 @@ See [`scripts/README-E2E.md`](scripts/README-E2E.md) for end-to-end devnet valid
 | [`ARCHITECTURE.md`](ARCHITECTURE.md) | Storage layout, share accounting math, asset flow diagrams |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Development setup, CI requirements, PR process |
 | [`scripts/README-E2E.md`](scripts/README-E2E.md) | End-to-end devnet test guide |
-| [`SECURITY.md`](SECURITY.md) | Trust model, threat analysis, and owner-compromise runbook |
+| [`SECURITY.md`](SECURITY.md) | Trust model, threat analysis, pause-semantics matrix, and owner-compromise runbook |
+| [`docs/BUG_BOUNTY.md`](docs/BUG_BOUNTY.md) | Bug bounty scope, severity rubric, safe-harbor terms, and payout process |
 | [`docs/MAINNET_CHECKLIST.md`](docs/MAINNET_CHECKLIST.md) | Pre-mainnet deployment checklist |
 | [`docs/DEX_INTEGRATION.md`](docs/DEX_INTEGRATION.md) | DEX strategy behaviour, integration assumptions, and liquidity routing |
 | [`docs/BLEND_INTEGRATION_RESEARCH.md`](docs/BLEND_INTEGRATION_RESEARCH.md) | Blend protocol supply/withdraw design and cross-contract call patterns |
+| [`docs/LEAST_PRIVILEGE_AGENT.md`](docs/LEAST_PRIVILEGE_AGENT.md) | Least-privilege evaluation: separate rebalancer vs reporter agent roles (Issue #606) |
+| [`docs/GUARDIAN_KEY_DESIGN.md`](docs/GUARDIAN_KEY_DESIGN.md) | Guardian-key design: second signature for `execute_upgrade` (Issue #607) |
 
 ## Smart Contract
 The core Soroban vault contract handles all on-chain fund management.
@@ -229,6 +238,7 @@ The core Soroban vault contract handles all on-chain fund management.
 | `withdraw` | User (their own funds) | Withdraw USDC back to wallet |
 | `withdraw_all` | User (their own funds) | Withdraw all USDC by burning all shares |
 | `rebalance` | AI Agent only | Move funds between yield strategies (`protocol`, `expected_apy`, `min_out`; supported: `blend`, `dex`, `none`) |
+| `harvest` | AI Agent only | Withdraw accrued yield from `CurrentProtocol` and re-supply it with `min_out` slippage protection |
 | `set_blend_pool` | Owner only | Configure the Blend lending pool address |
 | `set_dex_pool` | Owner only | Configure the DEX liquidity pool address |
 | `get_balance` | Anyone | Read a user's current balance |

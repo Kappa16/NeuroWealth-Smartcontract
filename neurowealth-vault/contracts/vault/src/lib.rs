@@ -267,6 +267,26 @@ pub enum VaultError {
     UsdcTokenCannotBeZeroAddress = 65,
     /// Maximum per-transaction deposit exceeds the absolute configured ceiling.
     MaximumDepositExceedsCeiling = 66,
+    /// Migration is paused by the owner.
+    MigrationPaused = 67,
+    /// Migration target vault address is not set by owner.
+    InvalidMigrationTarget = 68,
+    /// User has no shares to migrate.
+    NoSharesToMigrate = 69,
+    /// Shares are already locked.
+    SharesAlreadyLocked = 70,
+    /// Lock period has not ended.
+    LockPeriodNotEnded = 71,
+    /// Lock duration is not supported.
+    InvalidLockDuration = 72,
+    /// Insufficient unlocked shares to lock.
+    InsufficientUnlockedShares = 73,
+    /// Emergency withdrawal not allowed (vault not paused).
+    EmergencyWithdrawalNotAllowed = 74,
+    /// Withdrawal rejected: minimum holding period since last deposit has not elapsed (#659).
+    HoldingPeriodNotElapsed = 75,
+    /// Holding period configuration is invalid (must be non-negative) (#659).
+    InvalidHoldingPeriod = 76,
 }
 
 impl VaultError {
@@ -406,6 +426,46 @@ pub enum DataKey {
     /// pagination; entries are never removed, so fully-withdrawn users leave a
     /// stale slot that is filtered out at read time.
     UserSharesIndex,
+    /// Migration target vault address (#637).
+    ///
+    /// Set by the owner to enable vault migration during contract upgrades.
+    /// Users can migrate their shares to the new vault via `migrate_shares`.
+    MigrationTarget,
+    /// Migration pause state (#637).
+    ///
+    /// When true, users cannot migrate shares even if a migration target is set.
+    /// The owner can pause migration independently of the main vault pause.
+    MigrationPaused,
+    /// User's locked shares (key: user Address) (#636).
+    ///
+    /// Number of shares locked by the user for boosted APY. Locked shares
+    /// cannot be withdrawn until the lock period expires.
+    LockedShares(Address),
+    /// Latest ML-model APY prediction for a given protocol (#650).
+    /// Written by the agent via `submit_apy_prediction`. Keyed by protocol symbol.
+    ApyPrediction(Symbol),
+    /// Cumulative suspected MEV loss across all rebalance operations (#658).
+    /// Incremented by `submit_mev_report` when the agent detects extraction.
+    CumulativeMevLoss,
+    /// Count of rebalance operations where MEV extraction was suspected (#658).
+    MevIncidentCount,
+    /// Maximum acceptable MEV loss per rebalance in stroops, configured by
+    /// the owner. When a reported loss exceeds this value, an alert event is
+    /// emitted (#658). Zero means no threshold is set.
+    MaxAcceptableMevLoss,
+    /// User's lock expiry ledger (key: user Address) (#636).
+    ///
+    /// The ledger number at which the user's locked shares can be unlocked.
+    /// Set when shares are locked and used to enforce lock period.
+    LockExpiry(Address),
+    /// Minimum number of ledgers a user must wait after depositing before
+    /// they can withdraw. Configurable by the owner. When absent (or zero)
+    /// no holding period is enforced. Used for flash-loan protection (#659).
+    MinHoldingPeriod,
+    /// Ledger sequence of the most recent deposit for a given user (#659).
+    /// Written on every successful `deposit`. Used together with
+    /// `MinHoldingPeriod` to enforce the flash-loan protection window.
+    LastDepositLedger(Address),
 }
 
 // ============================================================================
@@ -606,6 +666,17 @@ pub struct VaultUnpausedEvent {
 #[contracttype]
 pub struct EmergencyPausedEvent {
     /// Owner address that triggered the emergency pause (read from storage, not the caller argument)
+    pub owner: Address,
+}
+
+#[contracttype]
+pub struct CircuitBreakerTriggeredEvent {
+    pub reason: String,
+    pub threshold_value: i128,
+}
+
+#[contracttype]
+pub struct CircuitBreakerResetEvent {
     pub owner: Address,
 }
 
@@ -1004,6 +1075,171 @@ pub struct UserInfo {
     pub shares: i128,
 }
 
+/// Emitted when a user migrates their shares to a new vault (#637).
+///
+/// # Topics
+/// - `SymbolShort("migrate")` (`TOPIC_MIGRATE`) - Event identifier
+/// - `Address` - the migrating user, published as an indexed topic
+#[contracttype]
+pub struct SharesMigratedEvent {
+    /// The user who migrated their shares
+    pub user: Address,
+    /// Old vault contract address
+    pub old_vault: Address,
+    /// New vault contract address
+    pub new_vault: Address,
+    /// Number of shares burned from old vault
+    pub shares_burned: i128,
+    /// Amount of assets (USDC) transferred to new vault
+    pub assets_transferred: i128,
+}
+
+/// Emitted when the owner sets or updates the migration target vault (#637).
+///
+/// # Topics
+/// - `SymbolShort("mig_tgt")` (`TOPIC_MIGRATION_TARGET_UPDATED`) - Event identifier
+#[contracttype]
+pub struct MigrationTargetUpdatedEvent {
+    /// Previous migration target address, or None if not set
+    pub old_target: Option<Address>,
+    /// New migration target address
+    pub new_target: Address,
+    /// Owner who triggered the change
+    pub owner: Address,
+}
+
+/// Emitted when migration is paused or unpaused by the owner (#637).
+///
+/// # Topics
+/// - `SymbolShort("mig_pse")` (`TOPIC_MIGRATION_PAUSED`) - Event identifier
+#[contracttype]
+pub struct MigrationPausedEvent {
+    /// `true` if migration is now paused, `false` if unpaused
+    pub paused: bool,
+    /// Owner who triggered the pause/unpause
+    pub owner: Address,
+}
+
+/// Emitted when a user locks their shares for boosted APY (#636).
+///
+/// # Topics
+/// - `SymbolShort("lock")` (`TOPIC_SHARES_LOCKED`) - Event identifier
+/// - `Address` - the user locking shares, published as an indexed topic
+#[contracttype]
+pub struct SharesLockedEvent {
+    /// The user who locked their shares
+    pub user: Address,
+    /// Number of shares locked
+    pub shares_locked: i128,
+    /// Lock duration in days
+    pub lock_duration_days: u32,
+    /// Boost multiplier applied (e.g., 1.1x, 1.25x, 1.5x)
+    pub boost_multiplier: u32,
+    /// Ledger when lock expires
+    pub expiry_ledger: u32,
+}
+
+/// Emitted when a user unlocks their shares (#636).
+///
+/// # Topics
+/// - `SymbolShort("unlock")` (`TOPIC_SHARES_UNLOCKED`) - Event identifier
+/// - `Address` - the user unlocking shares, published as an indexed topic
+#[contracttype]
+pub struct SharesUnlockedEvent {
+    /// The user who unlocked their shares
+    pub user: Address,
+    /// Number of shares unlocked
+    pub shares_unlocked: i128,
+}
+
+/// Emitted when a user performs an emergency withdrawal while vault is paused (#635).
+///
+/// # Topics
+/// - `SymbolShort("em_wd")` (`TOPIC_EMERGENCY_WITHDRAWAL`) - Event identifier
+/// - `Address` - the withdrawing user, published as an indexed topic
+#[contracttype]
+pub struct EmergencyWithdrawalEvent {
+    /// The user who performed the emergency withdrawal
+    pub user: Address,
+    /// Amount of USDC withdrawn (7 decimal places)
+    pub amount: i128,
+    /// Number of shares burned
+    pub shares: i128,
+    /// Whether funds were taken from idle balance (true) or protocol (false)
+    pub from_idle: bool,
+}
+
+/// On-chain record of an ML model APY forecast submitted by the agent (#650).
+///
+/// The off-chain LSTM / Prophet model produces a prediction for each supported
+/// protocol. The agent writes the latest forecast on-chain so that the rebalance
+/// decision and its inputs are fully auditable.
+///
+/// `predicted_apy_bps` is in basis points (100 bps = 1%). `confidence_bps` is
+/// the model's confidence expressed the same way (e.g., 8000 bps = 80%).
+/// `horizon_ledgers` is how many ledgers ahead the prediction covers.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ApyPrediction {
+    /// Protocol this prediction applies to ("blend", "dex", …).
+    pub protocol: Symbol,
+    /// Predicted APY in basis points (100 bps = 1%).
+    pub predicted_apy_bps: i128,
+    /// 1-hour-ahead APY forecast in basis points.
+    pub apy_1h_bps: i128,
+    /// 6-hour-ahead APY forecast in basis points.
+    pub apy_6h_bps: i128,
+    /// 24-hour-ahead APY forecast in basis points.
+    pub apy_24h_bps: i128,
+    /// Model confidence (0–10000 bps, where 10000 = 100%).
+    pub confidence_bps: u32,
+    /// Ledger at which this prediction was submitted.
+    pub submitted_at_ledger: u32,
+}
+
+/// Emitted when the off-chain agent reports suspected MEV extraction on a
+/// rebalance transaction (#658).
+///
+/// Indexers should aggregate `estimated_loss_stroops` across incidents to
+/// calculate the cumulative cost of MEV extraction to vault users.
+///
+/// # Topics
+/// - `0`: `SymbolShort("mev_alert")` — Event identifier
+#[contracttype]
+pub struct MevExtractionSuspectedEvent {
+    /// The rebalance protocol where MEV was suspected (e.g., "blend", "dex").
+    pub protocol: Symbol,
+    /// Agent-estimated amount lost to MEV in this transaction (stroops).
+    pub estimated_loss_stroops: i128,
+    /// The `min_out` value that was set for the rebalance that triggered the report.
+    pub min_out_used: i128,
+    /// Running total of suspected MEV losses since vault inception.
+    pub cumulative_loss_stroops: i128,
+    /// Number of MEV incidents recorded so far.
+    pub incident_count: u32,
+}
+
+/// Emitted when a withdrawal attempt is blocked by the flash-loan protection
+/// holding period (#659).
+///
+/// Indexers can use this event to track how often the protection triggers and
+/// to flag wallet addresses that repeatedly attempt same-ledger withdrawals.
+///
+/// # Topics
+/// - `0`: `SymbolShort("fl_block")` — Event identifier
+/// - `1`: `Address` — the user whose withdrawal was blocked (indexed topic)
+#[contracttype]
+pub struct FlashLoanProtectionTriggeredEvent {
+    /// The user whose withdrawal was rejected.
+    pub user: Address,
+    /// Ledger at which the user last deposited.
+    pub last_deposit_ledger: u32,
+    /// Current ledger at the time of the rejected withdrawal.
+    pub current_ledger: u32,
+    /// Configured minimum holding period (in ledgers).
+    pub min_holding_period: u32,
+}
+
 // ============================================================================
 // BLEND POOL CLIENT INTERFACE
 // ============================================================================
@@ -1061,12 +1297,24 @@ const UPGRADE_TIMELOCK_LEDGERS: u32 = 17_280;
 
 /// Minimum ledgers remaining before `touch_user_ttl` extends a user's `Shares` entry.
 const USER_SHARES_TTL_THRESHOLD: u32 = 100;
+
+/// Lock period constants for boosted APY tiers (#636).
+/// Assuming ~5 seconds per ledger on Stellar mainnet.
+const LOCK_30_DAYS_LEDGERS: u32 = 30 * 24 * 60 * 60 / 5; // ~518,400 ledgers
+const LOCK_90_DAYS_LEDGERS: u32 = 90 * 24 * 60 * 60 / 5; // ~1,555,200 ledgers
+const LOCK_180_DAYS_LEDGERS: u32 = 180 * 24 * 60 * 60 / 5; // ~3,110,400 ledgers
+
+/// Boost multipliers for lock periods (#636).
+/// Expressed in basis points (10000 = 1.0x, 11000 = 1.1x, etc.)
+const BOOST_30_DAYS: u32 = 11000; // 1.1x
+const BOOST_90_DAYS: u32 = 12500; // 1.25x
+const BOOST_180_DAYS: u32 = 15000; // 1.5x
 /// Target ledgers to extend a user's `Shares` entry to when maintaining TTL.
 const USER_SHARES_TTL_EXTEND_TO: u32 = 100;
 /// Default ledgers kept alive for Blend token approvals.
 ///
 /// The approval expiration ledger is calculated as:
-    /// `current_ledger_sequence + ApprovalTtl`.
+/// `current_ledger_sequence + ApprovalTtl`.
 const DEFAULT_BLEND_APPROVAL_TTL: u32 = 100_000;
 
 use topics::{
@@ -1074,12 +1322,12 @@ use topics::{
     TOPIC_AGENT_UPDATE_PROPOSED, TOPIC_APPROVAL_TTL_UPDATED, TOPIC_ASSETS_UPDATED,
     TOPIC_BLEND_POOL_CONFIGURED, TOPIC_BLEND_SUPPLY, TOPIC_BLEND_WITHDRAW, TOPIC_CAPS_UPDATED,
     TOPIC_DEPOSIT, TOPIC_DEPOSIT_LIMITS_UPDATED, TOPIC_DEX_POOL_CONFIGURED, TOPIC_DEX_SUPPLY,
-    TOPIC_DEX_WITHDRAW, TOPIC_EMERGENCY_HARVEST, TOPIC_EMERGENCY_PAUSED, TOPIC_INIT,
+    TOPIC_DEX_WITHDRAW, TOPIC_EMERGENCY_HARVEST, TOPIC_EMERGENCY_PAUSED, TOPIC_HARVEST, TOPIC_INIT,
     TOPIC_LIMITS_UPDATED, TOPIC_OWNERSHIP_CANCELLED, TOPIC_OWNERSHIP_INITIATED,
     TOPIC_OWNERSHIP_TRANSFERRED, TOPIC_PAUSED, TOPIC_PROTOCOL_CHANGED, TOPIC_REBALANCE,
     TOPIC_REBALANCE_COOLDOWN_UPDATED, TOPIC_REBALANCE_FAILED, TOPIC_TVL_CAP_UPDATED,
     TOPIC_UNPAUSED, TOPIC_UPGRADED, TOPIC_UPGRADE_CANCELLED, TOPIC_UPGRADE_SCHEDULED,
-    TOPIC_USER_CAP_UPDATED, TOPIC_USER_STRATEGY_UPDATED, TOPIC_WITHDRAW, TOPIC_HARVEST,
+    TOPIC_USER_CAP_UPDATED, TOPIC_USER_STRATEGY_UPDATED, TOPIC_WITHDRAW,
 };
 
 impl BlendPoolClient {
@@ -1531,7 +1779,9 @@ impl NeuroWealthVault {
         let new_total = total
             .checked_add(amount)
             .expect("vault: total deposits overflow");
-        env.storage().instance().set(&DataKey::TotalDeposits, &new_total);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalDeposits, &new_total);
 
         // Mint shares based on current share price and update total assets.
         // Inflation-attack mitigation: reject any deposit that would round down
@@ -1554,7 +1804,9 @@ impl NeuroWealthVault {
         let new_user_shares = current_shares
             .checked_add(shares_to_mint)
             .expect("vault: user shares overflow");
-        env.storage().persistent().set(&DataKey::Shares(user.clone()), &new_user_shares);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Shares(user.clone()), &new_user_shares);
 
         // Register the user in the active-share index the first time they hold
         // non-zero shares, so the `get_users_with_shares` indexer view can page
@@ -1596,14 +1848,23 @@ impl NeuroWealthVault {
         let new_total_shares = total_shares
             .checked_add(shares_to_mint)
             .expect("vault: total shares overflow");
-        env.storage().instance().set(&DataKey::TotalShares, &new_total_shares);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &new_total_shares);
 
         // Update total assets (principal + yield)
         let total_assets = Self::get_total_assets_internal(&env);
         let new_total_assets = total_assets
             .checked_add(amount)
             .expect("vault: total assets overflow");
-        env.storage().instance().set(&DataKey::TotalAssets, &new_total_assets);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalAssets, &new_total_assets);
+
+        // Record deposit ledger for flash-loan protection (#659).
+        env.storage()
+            .persistent()
+            .set(&DataKey::LastDepositLedger(user.clone()), &env.ledger().sequence());
 
         env.events().publish(
             (TOPIC_DEPOSIT, user.clone()),
@@ -1655,7 +1916,10 @@ impl NeuroWealthVault {
             let (token, amount) = entries.get(i).unwrap();
             // Until multi-asset is enabled, require all entries to use USDC.
             if token != usdc_token {
-                panic!("batch_deposit: token {} is not supported; only USDC is accepted", token);
+                panic!(
+                    "batch_deposit: token {:?} is not supported; only USDC is accepted",
+                    token
+                );
             }
             Self::require_positive_amount(&env, amount);
             total_amount = total_amount
@@ -1742,17 +2006,14 @@ impl NeuroWealthVault {
                 .expect("batch_deposit: total shares overflow")),
         );
 
-        let total_assets = Self::get_total_assets_internal(&env);
         for i in 0..total_entries {
-            let (token, amount) = entries.get(i).unwrap();
+            let (_token, amount) = entries.get(i).unwrap();
             env.events().publish(
                 (TOPIC_DEPOSIT, user.clone()),
                 DepositEvent {
                     user: user.clone(),
-                    token,
                     amount,
                     shares: shares_to_mint,
-                    total_assets,
                 },
             );
         }
@@ -1803,6 +2064,63 @@ impl NeuroWealthVault {
         Self::require_not_paused(&env);
         Self::require_positive_amount(&env, amount);
 
+        // Flash-loan protection: enforce minimum holding period (#659).
+        // If the owner has configured a non-zero MinHoldingPeriod, reject any
+        // withdrawal attempted before `last_deposit_ledger + min_holding_period`.
+        let min_holding: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinHoldingPeriod)
+            .unwrap_or(0_u32);
+        if min_holding > 0 {
+            if let Some(last_deposit_ledger) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, u32>(&DataKey::LastDepositLedger(user.clone()))
+            {
+                let current_ledger = env.ledger().sequence();
+                let elapsed = current_ledger.saturating_sub(last_deposit_ledger);
+                if elapsed < min_holding {
+                    env.events().publish(
+                        (symbol_short!("fl_block"), user.clone()),
+                        FlashLoanProtectionTriggeredEvent {
+                            user: user.clone(),
+                            last_deposit_ledger,
+                            current_ledger,
+                            min_holding_period: min_holding,
+                        },
+                    );
+                    panic_with_error!(&env, VaultError::HoldingPeriodNotElapsed);
+                }
+            }
+        }
+
+        // Check if user has locked shares (#636)
+        let locked_shares: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LockedShares(user.clone()))
+            .unwrap_or(0_i128);
+        if locked_shares > 0 {
+            let total_user_shares: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Shares(user.clone()))
+                .unwrap_or(0_i128);
+            let unlocked_shares = total_user_shares - locked_shares;
+
+            // Calculate what the user can withdraw based on unlocked shares
+            let total_shares = Self::get_total_shares_internal(&env);
+            let total_assets = Self::get_total_assets_internal(&env);
+            let max_withdrawable = if total_shares > 0 && total_assets > 0 {
+                Self::convert_to_assets_internal(&env, unlocked_shares)
+            } else {
+                0
+            };
+
+            Self::require(&env, amount <= max_withdrawable, VaultError::InsufficientShares);
+        }
+
         // Check if funds are deployed in Blend and need to be retrieved
         let current_protocol: Symbol = env
             .storage()
@@ -1826,7 +2144,7 @@ impl NeuroWealthVault {
                 // Calculate how much we need to withdraw
                 let needed = amount
                     .checked_sub(vault_balance)
-                .expect("vault: withdrawal underflow");
+                    .expect("vault: withdrawal underflow");
 
                 // Attempt to withdraw from the active protocol (Blend or DEX).
                 // If this returns less than needed, we will reconcile below
@@ -1891,18 +2209,24 @@ impl NeuroWealthVault {
         let new_user_shares = user_shares
             .checked_sub(shares_to_burn)
             .expect("vault: withdrawal underflow");
-        env.storage().persistent().set(&DataKey::Shares(user.clone()), &new_user_shares);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Shares(user.clone()), &new_user_shares);
 
         let new_total_shares = total_shares
             .checked_sub(shares_to_burn)
             .expect("vault: withdrawal underflow");
-        env.storage().instance().set(&DataKey::TotalShares, &new_total_shares);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &new_total_shares);
 
         // Update total assets (principal + yield)
         let new_total_assets = total_assets
             .checked_sub(usdc_to_return)
             .expect("vault: withdrawal underflow");
-        env.storage().instance().set(&DataKey::TotalAssets, &new_total_assets);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalAssets, &new_total_assets);
 
         Self::reduce_total_deposits_on_withdraw(&env, usdc_to_return);
 
@@ -1961,6 +2285,30 @@ impl NeuroWealthVault {
 
         Self::require_not_paused(&env);
 
+        // Check if user has locked shares (#636)
+        let locked_shares: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LockedShares(user.clone()))
+            .unwrap_or(0_i128);
+
+        let user_shares: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Shares(user.clone()))
+            .unwrap_or(0_i128);
+
+        // If user has locked shares, only withdraw unlocked shares
+        let shares_to_withdraw = if locked_shares > 0 {
+            let unlocked_shares = user_shares - locked_shares;
+            if unlocked_shares == 0 {
+                panic_with_error!(&env, VaultError::InsufficientShares);
+            }
+            unlocked_shares
+        } else {
+            user_shares
+        };
+
         // Check if funds are deployed in Blend and need to be retrieved
         let current_protocol: Symbol = env
             .storage()
@@ -1971,12 +2319,7 @@ impl NeuroWealthVault {
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
         let token_client = token::Client::new(&env, &usdc_token);
 
-        let user_shares: i128 = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Shares(user.clone()))
-            .unwrap_or(0_i128);
-        Self::require(&env, user_shares > 0, VaultError::NoSharesToWithdraw);
+        Self::require(&env, shares_to_withdraw > 0, VaultError::NoSharesToWithdraw);
 
         let total_shares = Self::get_total_shares_internal(&env);
         let total_assets = Self::get_total_assets_internal(&env);
@@ -1987,9 +2330,9 @@ impl NeuroWealthVault {
         );
 
         // Calculate assets user is entitled to based on their shares
-        let entitled_amount = Self::convert_to_assets_internal(&env, user_shares);
+        let entitled_amount = Self::convert_to_assets_internal(&env, shares_to_withdraw);
         let mut usdc_to_return = entitled_amount;
-        let mut shares_to_burn = user_shares;
+        let mut shares_to_burn = shares_to_withdraw;
 
         if current_protocol == symbol_short!("blend") || current_protocol == symbol_short!("dex") {
             // Check vault's USDC balance
@@ -2024,19 +2367,25 @@ impl NeuroWealthVault {
         let new_user_shares = user_shares
             .checked_sub(shares_to_burn)
             .expect("vault: withdrawal underflow");
-        env.storage().persistent().set(&DataKey::Shares(user.clone()), &new_user_shares);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Shares(user.clone()), &new_user_shares);
 
         // Update total shares
         let new_total_shares = total_shares
             .checked_sub(shares_to_burn)
             .expect("vault: withdrawal underflow");
-        env.storage().instance().set(&DataKey::TotalShares, &new_total_shares);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &new_total_shares);
 
         // Update total assets
         let new_total_assets = total_assets
             .checked_sub(usdc_to_return)
             .expect("vault: withdrawal underflow");
-        env.storage().instance().set(&DataKey::TotalAssets, &new_total_assets);
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalAssets, &new_total_assets);
 
         Self::reduce_total_deposits_on_withdraw(&env, usdc_to_return);
 
@@ -2058,8 +2407,500 @@ impl NeuroWealthVault {
     }
 
     // ==========================================================================
+    // CORE LIFECYCLE - MIGRATION (#637)
+    // ==========================================================================
+
+    /// Migrates user shares from this vault to a new vault contract.
+    ///
+    /// This function enables trustless migration during contract upgrades:
+    /// - Burns user's shares in the old vault (this contract)
+    /// - Calculates the asset value using current exchange rate
+    /// - Calls deposit on the new vault on behalf of the user
+    /// - Preserves share value through exchange rate conversion
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment.
+    /// * `user` - The user address migrating shares (must authorize).
+    ///
+    /// # Returns
+    ///
+    /// None.
+    ///
+    /// # Events
+    ///
+    /// Emits:
+    /// - `SharesMigratedEvent`
+    ///
+    /// # Errors
+    ///
+    /// - [`VaultError::MigrationPaused`] if migration is paused by owner.
+    /// - [`VaultError::InvalidMigrationTarget`] if no migration target is set.
+    /// - [`VaultError::NoSharesToMigrate`] if user has no shares.
+    ///
+    /// # Panics
+    ///
+    /// - If the vault is not initialized.
+    /// - If the caller is not the user (authentication check).
+    pub fn migrate_shares(env: Env, user: Address) {
+        Self::require_initialized(&env);
+        user.require_auth();
+
+        // Check migration pause state
+        let migration_paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::MigrationPaused)
+            .unwrap_or(false);
+        Self::require(&env, !migration_paused, VaultError::MigrationPaused);
+
+        // Check migration target is set
+        let migration_target: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::MigrationTarget)
+            .unwrap_or_else(|| panic_with_error!(&env, VaultError::InvalidMigrationTarget));
+
+        // Get user's current shares
+        let user_shares: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Shares(user.clone()))
+            .unwrap_or(0_i128);
+        Self::require(&env, user_shares > 0, VaultError::NoSharesToMigrate);
+
+        // Calculate asset value using current exchange rate
+        let total_shares = Self::get_total_shares_internal(&env);
+        let total_assets = Self::get_total_assets_internal(&env);
+        let assets_to_transfer = Self::convert_to_assets_internal(&env, user_shares);
+
+        // Burn shares from user
+        let new_user_shares = 0_i128;
+        env.storage()
+            .persistent()
+            .set(&DataKey::Shares(user.clone()), &new_user_shares);
+
+        let new_total_shares = total_shares
+            .checked_sub(user_shares)
+            .expect("vault: migration underflow");
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &new_total_shares);
+
+        // Update total assets
+        let new_total_assets = total_assets
+            .checked_sub(assets_to_transfer)
+            .expect("vault: migration underflow");
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalAssets, &new_total_assets);
+
+        // Transfer USDC to new vault and call deposit on behalf of user
+        let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
+        let token_client = token::Client::new(&env, &usdc_token);
+        token_client.transfer(&env.current_contract_address(), &migration_target, &assets_to_transfer);
+
+        // Call deposit on new vault on behalf of user using cross-contract call
+        // The new vault must implement a deposit function with signature (Env, Address, i128)
+        let deposit_args: Vec<Val> = vec![&env, user.clone().into_val(&env), assets_to_transfer.into_val(&env)];
+        env.invoke_contract::<()>(&migration_target, &Symbol::new(&env, "deposit"), deposit_args);
+
+        // Emit migration event
+        env.events().publish(
+            (TOPIC_MIGRATE, user.clone()),
+            SharesMigratedEvent {
+                user: user.clone(),
+                old_vault: env.current_contract_address(),
+                new_vault: migration_target,
+                shares_burned: user_shares,
+                assets_transferred: assets_to_transfer,
+            },
+        );
+    }
+
+    // ==========================================================================
+    // CORE LIFECYCLE - SHARE LOCKING (#636)
+    // ==========================================================================
+
+    /// Locks user shares for a configurable period to earn boosted APY.
+    ///
+    /// Users can voluntarily lock their shares for higher yields:
+    /// - 30 days = 1.1x boost
+    /// - 90 days = 1.25x boost
+    /// - 180 days = 1.5x boost
+    ///
+    /// Locked shares cannot be withdrawn until the lock period expires.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment.
+    /// * `user` - The user address locking shares (must authorize).
+    /// * `shares` - Number of shares to lock.
+    /// * `lock_duration_days` - Lock period in days (30, 90, or 180).
+    ///
+    /// # Returns
+    ///
+    /// None.
+    ///
+    /// # Events
+    ///
+    /// Emits:
+    /// - `SharesLockedEvent`
+    ///
+    /// # Errors
+    ///
+    /// - [`VaultError::SharesAlreadyLocked`] if user already has locked shares.
+    /// - [`VaultError::InvalidLockDuration`] if duration is not 30, 90, or 180 days.
+    /// - [`VaultError::InsufficientUnlockedShares`] if user doesn't have enough unlocked shares.
+    ///
+    /// # Panics
+    ///
+    /// - If the vault is not initialized.
+    /// - If the caller is not the user (authentication check).
+    pub fn lock_shares(env: Env, user: Address, shares: i128, lock_duration_days: u32) {
+        Self::require_initialized(&env);
+        user.require_auth();
+
+        // Check if user already has locked shares
+        let existing_locked: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LockedShares(user.clone()))
+            .unwrap_or(0_i128);
+        Self::require(&env, existing_locked == 0, VaultError::SharesAlreadyLocked);
+
+        // Validate lock duration and get boost multiplier
+        let (lock_ledgers, boost_multiplier) = match lock_duration_days {
+            30 => (LOCK_30_DAYS_LEDGERS, BOOST_30_DAYS),
+            90 => (LOCK_90_DAYS_LEDGERS, BOOST_90_DAYS),
+            180 => (LOCK_180_DAYS_LEDGERS, BOOST_180_DAYS),
+            _ => panic_with_error!(&env, VaultError::InvalidLockDuration),
+        };
+
+        // Check user has enough unlocked shares
+        let total_user_shares: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Shares(user.clone()))
+            .unwrap_or(0_i128);
+        let unlocked_shares = total_user_shares - existing_locked;
+        Self::require(&env, shares <= unlocked_shares, VaultError::InsufficientUnlockedShares);
+
+        // Calculate lock expiry ledger
+        let current_ledger = env.ledger().sequence();
+        let expiry_ledger = current_ledger + lock_ledgers;
+
+        // Store locked shares and expiry
+        env.storage()
+            .persistent()
+            .set(&DataKey::LockedShares(user.clone()), &shares);
+        env.storage()
+            .persistent()
+            .set(&DataKey::LockExpiry(user.clone()), &expiry_ledger);
+
+        // Emit lock event
+        env.events().publish(
+            (TOPIC_SHARES_LOCKED, user.clone()),
+            SharesLockedEvent {
+                user: user.clone(),
+                shares_locked: shares,
+                lock_duration_days,
+                boost_multiplier,
+                expiry_ledger,
+            },
+        );
+    }
+
+    /// Unlocks user shares after the lock period has expired.
+    ///
+    /// Users can only unlock shares after the lock period has ended.
+    /// This releases the shares for normal withdrawal.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment.
+    /// * `user` - The user address unlocking shares (must authorize).
+    ///
+    /// # Returns
+    ///
+    /// None.
+    ///
+    /// # Events
+    ///
+    /// Emits:
+    /// - `SharesUnlockedEvent`
+    ///
+    /// # Errors
+    ///
+    /// - [`VaultError::LockPeriodNotEnded`] if the lock period has not expired.
+    ///
+    /// # Panics
+    ///
+    /// - If the vault is not initialized.
+    /// - If the caller is not the user (authentication check).
+    /// - If the user has no locked shares.
+    pub fn unlock_shares(env: Env, user: Address) {
+        Self::require_initialized(&env);
+        user.require_auth();
+
+        // Get locked shares and expiry
+        let locked_shares: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LockedShares(user.clone()))
+            .unwrap_or(0_i128);
+        Self::require(&env, locked_shares > 0, VaultError::NoSharesToMigrate);
+
+        let expiry_ledger: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LockExpiry(user.clone()))
+            .unwrap();
+
+        // Check if lock period has ended
+        let current_ledger = env.ledger().sequence();
+        Self::require(&env, current_ledger >= expiry_ledger, VaultError::LockPeriodNotEnded);
+
+        // Clear locked shares and expiry
+        env.storage()
+            .persistent()
+            .set(&DataKey::LockedShares(user.clone()), &0_i128);
+        env.storage()
+            .persistent()
+            .remove(&DataKey::LockExpiry(user.clone()));
+
+        // Emit unlock event
+        env.events().publish(
+            (TOPIC_SHARES_UNLOCKED, user.clone()),
+            SharesUnlockedEvent {
+                user: user.clone(),
+                shares_unlocked: locked_shares,
+            },
+        );
+    }
+
+    /// Gets user's locked shares and lock expiry information.
+    ///
+    /// Returns the number of locked shares and the ledger when they can be unlocked.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment.
+    /// * `user` - The user address to query.
+    ///
+    /// # Returns
+    ///
+    /// A tuple of (locked_shares, unlock_ledger) where:
+    /// - `locked_shares` is the number of shares currently locked (0 if none)
+    /// - `unlock_ledger` is the ledger number when shares can be unlocked (0 if none)
+    ///
+    /// # Events
+    ///
+    /// None.
+    ///
+    /// # Errors
+    ///
+    /// None.
+    ///
+    /// # Panics
+    ///
+    /// - If the vault is not initialized.
+    pub fn get_locked_shares(env: Env, user: Address) -> (i128, u32) {
+        Self::require_initialized(&env);
+
+        let locked_shares: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LockedShares(user.clone()))
+            .unwrap_or(0_i128);
+        let unlock_ledger: u32 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::LockExpiry(user.clone()))
+            .unwrap_or(0_u32);
+
+        (locked_shares, unlock_ledger)
+    }
+
+    // ==========================================================================
+    // CORE LIFECYCLE - EMERGENCY WITHDRAWAL (#635)
+    // ==========================================================================
+
+    /// Emergency withdrawal function that works when the vault is paused.
+    ///
+    /// When the vault is paused, users cannot withdraw through normal means.
+    /// This function provides a safety mechanism for users to recover their funds
+    /// if the owner pauses the vault for an extended period or during governance disputes.
+    ///
+    /// This function:
+    /// - Works even when the vault is paused
+    /// - Requires user authentication (only their own funds)
+    /// - Deducts from idle balance first, then from protocol if needed
+    /// - Does not affect rebalance or other admin operations
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment.
+    /// * `user` - The user address withdrawing funds (must authorize).
+    /// * `amount` - Amount of USDC to withdraw (7 decimal places).
+    ///
+    /// # Returns
+    ///
+    /// None.
+    ///
+    /// # Events
+    ///
+    /// Emits:
+    /// - `EmergencyWithdrawalEvent`
+    ///
+    /// # Errors
+    ///
+    /// - [`VaultError::EmergencyWithdrawalNotAllowed`] if the vault is not paused.
+    ///
+    /// # Panics
+    ///
+    /// - If the vault is not initialized.
+    /// - If the caller is not the user (authentication check).
+    /// - If user has insufficient shares.
+    /// - If there's insufficient liquidity.
+    pub fn emergency_withdraw(env: Env, user: Address, amount: i128) {
+        Self::require_initialized(&env);
+        user.require_auth();
+
+        // Only allow emergency withdrawal when vault is paused
+        let paused: bool = env
+            .storage()
+            .instance()
+            .get(&DataKey::Paused)
+            .unwrap_or(false);
+        Self::require(&env, paused, VaultError::EmergencyWithdrawalNotAllowed);
+
+        Self::require_positive_amount(&env, amount);
+
+        let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
+        let token_client = token::Client::new(&env, &usdc_token);
+
+        // Check vault's idle USDC balance
+        let vault_balance = token_client.balance(&env.current_contract_address());
+        let mut from_idle = false;
+        let mut actual_to_return = amount;
+
+        // If vault doesn't have enough idle USDC, try to withdraw from protocol
+        if vault_balance < amount {
+            let current_protocol: Symbol = env
+                .storage()
+                .instance()
+                .get(&DataKey::CurrentProtocol)
+                .unwrap_or(symbol_short!("none"));
+
+            if current_protocol == symbol_short!("blend") || current_protocol == symbol_short!("dex") {
+                // Calculate how much we need to withdraw
+                let needed = amount
+                    .checked_sub(vault_balance)
+                    .expect("vault: withdrawal underflow");
+
+                // Attempt to withdraw from the active protocol
+                let _withdrawn =
+                    Self::withdraw_amount_from_protocol(&env, &current_protocol, needed, 0);
+
+                // Check actual available USDC after the withdrawal
+                let available_usdc = token_client.balance(&env.current_contract_address());
+                actual_to_return = min(amount, available_usdc);
+            } else {
+                actual_to_return = vault_balance;
+            }
+        } else {
+            from_idle = true;
+        }
+
+        Self::require(
+            &env,
+            actual_to_return > 0,
+            VaultError::InsufficientLiquidity,
+        );
+
+        // Share-based withdrawal
+        let user_shares: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Shares(user.clone()))
+            .unwrap_or(0_i128);
+        Self::require(&env, user_shares > 0, VaultError::InsufficientShares);
+
+        let total_shares = Self::get_total_shares_internal(&env);
+        let total_assets = Self::get_total_assets_internal(&env);
+        Self::require(
+            &env,
+            total_shares > 0 && total_assets > 0,
+            VaultError::NoAssetsToWithdraw,
+        );
+
+        // Use ceiling division to prevent dust attacks
+        let shares_to_burn = Self::convert_to_shares_internal_ceil(&env, actual_to_return);
+        Self::require(
+            &env,
+            shares_to_burn > 0,
+            VaultError::SharesToBurnMustBePositive,
+        );
+        Self::require(
+            &env,
+            user_shares >= shares_to_burn,
+            VaultError::InsufficientSharesForAmount,
+        );
+
+        // Calculate actual assets to return based on burned shares
+        let usdc_to_return = Self::convert_to_assets_internal(&env, shares_to_burn);
+
+        // Update user shares and total shares
+        let new_user_shares = user_shares
+            .checked_sub(shares_to_burn)
+            .expect("vault: withdrawal underflow");
+        env.storage()
+            .persistent()
+            .set(&DataKey::Shares(user.clone()), &new_user_shares);
+
+        let new_total_shares = total_shares
+            .checked_sub(shares_to_burn)
+            .expect("vault: withdrawal underflow");
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalShares, &new_total_shares);
+
+        // Update total assets
+        let new_total_assets = total_assets
+            .checked_sub(usdc_to_return)
+            .expect("vault: withdrawal underflow");
+        env.storage()
+            .instance()
+            .set(&DataKey::TotalAssets, &new_total_assets);
+
+        Self::reduce_total_deposits_on_withdraw(&env, usdc_to_return);
+
+        // Transfer USDC to user
+        token_client.transfer(&env.current_contract_address(), &user, &usdc_to_return);
+
+        // Emit emergency withdrawal event
+        env.events().publish(
+            (TOPIC_EMERGENCY_WITHDRAWAL, user.clone()),
+            EmergencyWithdrawalEvent {
+                user: user.clone(),
+                amount: usdc_to_return,
+                shares: shares_to_burn,
+                from_idle,
+            },
+        );
+    }
+
+    // ==========================================================================
     // CORE LIFECYCLE - REBALANCE
     // ==========================================================================
+
+    // NOTE: There is no `harvest()` entrypoint in this contract (Issue #496).
+    // Yield is reported via `update_total_assets()` called by the agent, which
+    // does not involve a separate harvest step. Consequently there is no
+    // `harvest()` failure path to wire into a circuit breaker. If a future
+    // version introduces a `harvest()` function, it should report outcomes to
+    // the circuit-breaker helper alongside `rebalance()`.
 
     /// Rebalances vault funds between yield strategies.
     ///
@@ -2541,7 +3382,23 @@ impl NeuroWealthVault {
 
         let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
         env.events()
-            .publish((TOPIC_EMERGENCY_PAUSED,), EmergencyPausedEvent { owner });
+            .publish((topics::TOPIC_EMERGENCY_PAUSED,), EmergencyPausedEvent { owner });
+    }
+
+    /// Resets the circuit breaker and unpauses the vault.
+    pub fn reset_circuit_breaker(env: Env, owner: Address) {
+        Self::require_initialized(&env);
+        owner.require_auth();
+        let stored_owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
+        Self::require(
+            &env,
+            owner == stored_owner,
+            VaultError::OnlyOwnerCanUnpause,
+        );
+        env.storage().instance().set(&DataKey::ConsecutiveFailures, &0_u32);
+        env.storage().instance().set(&DataKey::Paused, &false);
+        env.events()
+            .publish((topics::TOPIC_CIRCUIT_BREAKER_RESET,), CircuitBreakerResetEvent { owner });
     }
 
     /// Owner-callable emergency harvest fallback for agent-key outages.
@@ -2648,6 +3505,101 @@ impl NeuroWealthVault {
         env.storage()
             .instance()
             .set(&DataKey::LastRebalanceLedger, &env.ledger().sequence());
+    }
+
+    // ==========================================================================
+    // ADMINISTRATIVE - MIGRATION CONTROL (#637)
+    // ==========================================================================
+
+    /// Sets the migration target vault address.
+    ///
+    /// Only the owner can set this address. Users can only migrate to the
+    /// address set by the owner to prevent migration to malicious contracts.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment.
+    /// * `target` - The new vault contract address to allow migration to.
+    ///
+    /// # Returns
+    ///
+    /// None.
+    ///
+    /// # Events
+    ///
+    /// Emits:
+    /// - `MigrationTargetUpdatedEvent`
+    ///
+    /// # Errors
+    ///
+    /// None.
+    ///
+    /// # Panics
+    ///
+    /// - If the caller is not the owner.
+    pub fn set_migration_target(env: Env, target: Address) {
+        Self::require_initialized(&env);
+        Self::require_is_owner(&env);
+
+        let old_target: Option<Address> = env
+            .storage()
+            .instance()
+            .get(&DataKey::MigrationTarget);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MigrationTarget, &target);
+
+        let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
+        env.events().publish(
+            (TOPIC_MIGRATION_TARGET_UPDATED,),
+            MigrationTargetUpdatedEvent {
+                old_target,
+                new_target: target,
+                owner,
+            },
+        );
+    }
+
+    /// Pauses or unpauses share migration independently of the main vault pause.
+    ///
+    /// The owner can pause migration without pausing deposits/withdrawals, or
+    /// vice versa. This provides granular control during upgrades.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment.
+    /// * `paused` - `true` to pause migration, `false` to unpause.
+    ///
+    /// # Returns
+    ///
+    /// None.
+    ///
+    /// # Events
+    ///
+    /// Emits:
+    /// - `MigrationPausedEvent`
+    ///
+    /// # Errors
+    ///
+    /// None.
+    ///
+    /// # Panics
+    ///
+    /// - If the caller is not the owner.
+    pub fn set_migration_paused(env: Env, paused: bool) {
+        Self::require_initialized(&env);
+        Self::require_is_owner(&env);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::MigrationPaused, &paused);
+
+        let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
+        env.events().publish(
+            (TOPIC_MIGRATION_PAUSED,),
+            MigrationPausedEvent { paused, owner },
+        );
     }
 
     // ==========================================================================
@@ -3108,6 +4060,176 @@ impl NeuroWealthVault {
             .unwrap_or(0)
     }
 
+    /// Sets the minimum number of ledgers a user must hold their deposit before
+    /// they can withdraw. Passing `0` disables the holding period (default).
+    ///
+    /// Only callable by the vault owner. Used to mitigate flash-loan attacks
+    /// that manipulate share prices by depositing and immediately withdrawing
+    /// in the same or adjacent transactions (#659).
+    ///
+    /// A ledger on Stellar closes approximately every 5 seconds. A holding
+    /// period of 120 ledgers (~10 minutes) prevents same-block deposit/withdraw
+    /// cycles while keeping withdrawal UX acceptable for normal users.
+    ///
+    /// # Panics
+    /// - [`VaultError::CallerIsNotOwner`] if caller is not the owner.
+    pub fn set_min_holding_period(env: Env, ledgers: u32) {
+        Self::require_initialized(&env);
+        Self::require_is_owner(&env);
+
+        if ledgers == 0 {
+            env.storage().instance().remove(&DataKey::MinHoldingPeriod);
+        } else {
+            env.storage()
+                .instance()
+                .set(&DataKey::MinHoldingPeriod, &ledgers);
+        }
+    }
+
+    /// Returns the configured minimum holding period in ledgers, or `0` if
+    /// no holding period has been set (flash-loan protection disabled).
+    pub fn get_min_holding_period(env: Env) -> u32 {
+        Self::require_initialized(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::MinHoldingPeriod)
+            .unwrap_or(0)
+    }
+
+    /// Records a suspected MEV extraction event after a rebalance (#658).
+    ///
+    /// Called by the off-chain agent when post-execution analysis suggests a
+    /// sandwich attack occurred (e.g., actual received amount was less than
+    /// expected even though `min_out` was satisfied). The agent computes the
+    /// estimated loss by comparing the simulated vs. actual fill price.
+    ///
+    /// Emits `MevExtractionSuspectedEvent`. If the reported loss exceeds the
+    /// owner-configured `MaxAcceptableMevLoss` threshold, the event payload
+    /// signals indexers/monitoring to alert the team.
+    ///
+    /// # Arguments
+    /// * `protocol` — Protocol on which MEV was detected ("blend" or "dex").
+    /// * `estimated_loss_stroops` — Agent-estimated stroops lost to MEV.
+    /// * `min_out_used` — The `min_out` parameter passed to `rebalance`.
+    ///
+    /// # Panics
+    /// - [`VaultError::CallerIsNotAgent`] if caller is not the authorized agent.
+    /// - If `estimated_loss_stroops` is negative.
+    pub fn submit_mev_report(
+        env: Env,
+        protocol: Symbol,
+        estimated_loss_stroops: i128,
+        min_out_used: i128,
+    ) {
+        Self::require_initialized(&env);
+        Self::require_is_agent(&env);
+
+        assert!(
+            estimated_loss_stroops >= 0,
+            "estimated_loss_stroops must be non-negative"
+        );
+
+        let cumulative: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CumulativeMevLoss)
+            .unwrap_or(0_i128);
+        let new_cumulative = cumulative
+            .checked_add(estimated_loss_stroops)
+            .expect("vault: mev cumulative overflow");
+
+        let incident_count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MevIncidentCount)
+            .unwrap_or(0_u32);
+        let new_count = incident_count.saturating_add(1);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CumulativeMevLoss, &new_cumulative);
+        env.storage()
+            .instance()
+            .set(&DataKey::MevIncidentCount, &new_count);
+
+        env.events().publish(
+            (symbol_short!("mev_alert"),),
+            MevExtractionSuspectedEvent {
+                protocol,
+                estimated_loss_stroops,
+                min_out_used,
+                cumulative_loss_stroops: new_cumulative,
+                incident_count: new_count,
+            },
+        );
+    }
+
+    /// Returns `(cumulative_mev_loss_stroops, incident_count)` for monitoring (#658).
+    pub fn get_mev_stats(env: Env) -> (i128, u32) {
+        Self::require_initialized(&env);
+        let loss: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CumulativeMevLoss)
+            .unwrap_or(0);
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MevIncidentCount)
+            .unwrap_or(0);
+        (loss, count)
+    }
+
+    /// Sets the maximum acceptable MEV loss per rebalance in stroops (#658).
+    /// A value of `0` disables the threshold check.
+    ///
+    /// Only callable by the vault owner.
+    pub fn set_max_acceptable_mev_loss(env: Env, max_loss_stroops: i128) {
+        Self::require_initialized(&env);
+        Self::require_is_owner(&env);
+        assert!(max_loss_stroops >= 0, "max_loss_stroops must be non-negative");
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxAcceptableMevLoss, &max_loss_stroops);
+    }
+
+    /// Stores an ML model APY prediction on-chain for a given protocol (#650).
+    ///
+    /// Called by the off-chain agent after running inference on the LSTM /
+    /// Prophet model. Predictions are stored per-protocol and overwrite the
+    /// previous forecast. The `rebalance()` call can then read the latest
+    /// prediction via `get_apy_prediction` to make a more informed decision.
+    ///
+    /// # Arguments
+    /// * `prediction` — Populated `ApyPrediction` struct from the agent.
+    ///
+    /// # Panics
+    /// - [`VaultError::CallerIsNotAgent`] if caller is not the authorized agent.
+    pub fn submit_apy_prediction(env: Env, prediction: ApyPrediction) {
+        Self::require_initialized(&env);
+        Self::require_is_agent(&env);
+
+        let key = DataKey::ApyPrediction(prediction.protocol.clone());
+        let record = ApyPrediction {
+            submitted_at_ledger: env.ledger().sequence(),
+            ..prediction
+        };
+        env.storage().persistent().set(&key, &record);
+    }
+
+    /// Returns the most recent ML model APY prediction for a given protocol,
+    /// or `None` if no prediction has been submitted yet (#650).
+    ///
+    /// The `rebalance` caller (agent) should check this value to decide the
+    /// `expected_apy` argument for the next rebalance call. A `None` result
+    /// means the agent should fall back to the current observed APY.
+    pub fn get_apy_prediction(env: Env, protocol: Symbol) -> Option<ApyPrediction> {
+        Self::require_initialized(&env);
+        env.storage()
+            .persistent()
+            .get(&DataKey::ApyPrediction(protocol))
+    }
+
     /// Returns the ledger sequence number of the most recent successful
     /// rebalance() call, or `0` if rebalance has never been called.
     ///
@@ -3396,6 +4518,14 @@ impl NeuroWealthVault {
     /// Setting the same strategy twice is allowed and re-emits the event with
     /// `old_strategy == new_strategy`.
     ///
+    /// **Storage-only — no on-chain effect on fund deployment.**
+    /// `rebalance()` and `deposit()` never read `DataKey::UserStrategy`; the vault
+    /// deploys funds pooled to a single `CurrentProtocol` regardless of any
+    /// individual user's selection. The off-chain AI agent is expected to consume
+    /// this preference when deciding yield allocation. A user's chosen strategy can
+    /// therefore diverge from where their share of the pooled funds is actually
+    /// deployed.
+    ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment.
@@ -3472,6 +4602,12 @@ impl NeuroWealthVault {
     /// who have never called [`set_user_strategy`](crate::NeuroWealthVault::set_user_strategy) are reported as
     /// `"balanced"`, so callers cannot distinguish "never set" from
     /// "explicitly set to balanced" through this function alone.
+    ///
+    /// **Storage-only — no on-chain effect on fund deployment.**
+    /// This value is a per-user preference stored for the off-chain AI agent to
+    /// read. `rebalance()` and `deposit()` do not consult it; the vault pools all
+    /// funds to a single `CurrentProtocol`. See [`Self::set_user_strategy`] for
+    /// details.
     ///
     /// # Arguments
     ///
@@ -3613,7 +4749,9 @@ impl NeuroWealthVault {
 
         env.storage().instance().set(&DataKey::Agent, &new_agent);
         env.storage().instance().remove(&DataKey::PendingAgent);
-        env.storage().instance().remove(&DataKey::AgentTimelockExpiry);
+        env.storage()
+            .instance()
+            .remove(&DataKey::AgentTimelockExpiry);
 
         env.events().publish(
             (TOPIC_AGENT_UPDATE_CONFIRMED,),
@@ -3665,7 +4803,9 @@ impl NeuroWealthVault {
             .unwrap();
 
         env.storage().instance().remove(&DataKey::PendingAgent);
-        env.storage().instance().remove(&DataKey::AgentTimelockExpiry);
+        env.storage()
+            .instance()
+            .remove(&DataKey::AgentTimelockExpiry);
 
         env.events().publish(
             (TOPIC_AGENT_UPDATE_CANCELLED,),
@@ -4081,8 +5221,7 @@ impl NeuroWealthVault {
     /// `Some(PendingOwnershipInfo)` if a transfer is pending, `None` otherwise
     pub fn get_pending_ownership(env: Env) -> Option<PendingOwnershipInfo> {
         Self::require_initialized(&env);
-        let pending_owner: Option<Address> =
-            env.storage().instance().get(&DataKey::PendingOwner);
+        let pending_owner: Option<Address> = env.storage().instance().get(&DataKey::PendingOwner);
         pending_owner.map(|owner| PendingOwnershipInfo {
             pending_owner: owner,
             timelock_expiry: 0,
@@ -4600,8 +5739,7 @@ impl NeuroWealthVault {
                     .unwrap_or(false);
                 if !already_paused {
                     env.storage().instance().set(&DataKey::Paused, &true);
-                    let owner: Address =
-                        env.storage().instance().get(&DataKey::Owner).unwrap();
+                    let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
                     env.events()
                         .publish((TOPIC_EMERGENCY_PAUSED,), EmergencyPausedEvent { owner });
                 }
@@ -6009,10 +7147,13 @@ impl NeuroWealthVault {
             return 0;
         }
 
-        let pool_address: Address = env.storage().instance().get(&DataKey::BlendPool).unwrap_or_else(|| {
-            panic_with_error!(env, VaultError::BlendPoolNotConfigured);
-            unreachable!()
-        });
+        let pool_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::BlendPool)
+            .unwrap_or_else(|| {
+                panic_with_error!(env, VaultError::BlendPoolNotConfigured)
+            });
 
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
         let vault_address = env.current_contract_address();
@@ -6130,10 +7271,13 @@ impl NeuroWealthVault {
     /// - Panics if Blend pool address is not configured
     /// - Emits BlendWithdrawEvent with success status and actual amount received
     fn withdraw_from_blend(env: &Env, amount: i128, min_out: i128) -> i128 {
-        let pool_address: Address = env.storage().instance().get(&DataKey::BlendPool).unwrap_or_else(|| {
-            panic_with_error!(env, VaultError::BlendPoolNotConfigured);
-            unreachable!()
-        });
+        let pool_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::BlendPool)
+            .unwrap_or_else(|| {
+                panic_with_error!(env, VaultError::BlendPoolNotConfigured)
+            });
 
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
         let vault_address = env.current_contract_address();
@@ -6209,10 +7353,13 @@ impl NeuroWealthVault {
             return 0;
         }
 
-        let pool_address: Address = env.storage().instance().get(&DataKey::DexPool).unwrap_or_else(|| {
-            panic_with_error!(env, VaultError::DexPoolNotConfigured);
-            unreachable!()
-        });
+        let pool_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::DexPool)
+            .unwrap_or_else(|| {
+                panic_with_error!(env, VaultError::DexPoolNotConfigured)
+            });
 
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
         let vault_address = env.current_contract_address();
@@ -6327,10 +7474,13 @@ impl NeuroWealthVault {
     /// - Panics with `MinOutNotMet` if the realized amount is below `min_out`
     /// - Emits `DexWithdrawEvent` with success status and actual amount received
     fn withdraw_from_dex(env: &Env, amount: i128, min_out: i128) -> i128 {
-        let pool_address: Address = env.storage().instance().get(&DataKey::DexPool).unwrap_or_else(|| {
-            panic_with_error!(env, VaultError::DexPoolNotConfigured);
-            unreachable!()
-        });
+        let pool_address: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::DexPool)
+            .unwrap_or_else(|| {
+                panic_with_error!(env, VaultError::DexPoolNotConfigured)
+            });
 
         let usdc_token: Address = env.storage().instance().get(&DataKey::UsdcToken).unwrap();
         let vault_address = env.current_contract_address();
