@@ -257,36 +257,6 @@ pub enum VaultError {
     NoTimelockPending = 49,
     /// The timelock delay has not yet elapsed.
     TimelockNotExpired = 50,
-    /// Deployer address supplied to `initialize` is the zero address.
-    DeployerCannotBeZeroAddress = 62,
-    /// Owner address supplied to `initialize` is the zero address.
-    OwnerCannotBeZeroAddress = 63,
-    /// Agent address supplied to `initialize` is the zero address.
-    AgentCannotBeZeroAddress = 64,
-    /// USDC token address supplied to `initialize` is the zero address.
-    UsdcTokenCannotBeZeroAddress = 65,
-    /// Maximum per-transaction deposit exceeds the absolute configured ceiling.
-    MaximumDepositExceedsCeiling = 66,
-    /// Migration is paused by the owner.
-    MigrationPaused = 67,
-    /// Migration target vault address is not set by owner.
-    InvalidMigrationTarget = 68,
-    /// User has no shares to migrate.
-    NoSharesToMigrate = 69,
-    /// Shares are already locked.
-    SharesAlreadyLocked = 70,
-    /// Lock period has not ended.
-    LockPeriodNotEnded = 71,
-    /// Lock duration is not supported.
-    InvalidLockDuration = 72,
-    /// Insufficient unlocked shares to lock.
-    InsufficientUnlockedShares = 73,
-    /// Emergency withdrawal not allowed (vault not paused).
-    EmergencyWithdrawalNotAllowed = 74,
-    /// Withdrawal rejected: minimum holding period since last deposit has not elapsed (#659).
-    HoldingPeriodNotElapsed = 75,
-    /// Holding period configuration is invalid (must be non-negative) (#659).
-    InvalidHoldingPeriod = 76,
 }
 
 impl VaultError {
@@ -307,6 +277,24 @@ impl VaultError {
     pub const TotalAvailableOverflow: Self = Self::InvalidStrategy;
     pub const VersionOverflow: Self = Self::InvalidStrategy;
     pub const InvalidWasmHash: Self = Self::InvalidStrategy;
+    // The SDK caps `#[contracterror]` at 50 cases. Extra names stay as
+    // associated constants (same pattern as `InvalidWasmHash`) so call sites
+    // compile without growing the on-chain error enum past the spec limit.
+    pub const DeployerCannotBeZeroAddress: Self = Self::UnauthorizedDeployer;
+    pub const OwnerCannotBeZeroAddress: Self = Self::CallerIsNotOwner;
+    pub const AgentCannotBeZeroAddress: Self = Self::UnauthorizedDeployer;
+    pub const UsdcTokenCannotBeZeroAddress: Self = Self::UnauthorizedDeployer;
+    pub const MaximumDepositExceedsCeiling: Self = Self::MaximumDepositExceeded;
+    pub const MigrationPaused: Self = Self::Paused;
+    pub const InvalidMigrationTarget: Self = Self::InvalidStrategy;
+    pub const NoSharesToMigrate: Self = Self::NoSharesToWithdraw;
+    pub const SharesAlreadyLocked: Self = Self::InvalidStrategy;
+    pub const LockPeriodNotEnded: Self = Self::InvalidStrategy;
+    pub const InvalidLockDuration: Self = Self::InvalidStrategy;
+    pub const InsufficientUnlockedShares: Self = Self::InsufficientShares;
+    pub const EmergencyWithdrawalNotAllowed: Self = Self::NotPaused;
+    pub const HoldingPeriodNotElapsed: Self = Self::InvalidStrategy;
+    pub const InvalidHoldingPeriod: Self = Self::InvalidStrategy;
 }
 
 // ============================================================================
@@ -1322,12 +1310,14 @@ use topics::{
     TOPIC_AGENT_UPDATE_PROPOSED, TOPIC_APPROVAL_TTL_UPDATED, TOPIC_ASSETS_UPDATED,
     TOPIC_BLEND_POOL_CONFIGURED, TOPIC_BLEND_SUPPLY, TOPIC_BLEND_WITHDRAW, TOPIC_CAPS_UPDATED,
     TOPIC_DEPOSIT, TOPIC_DEPOSIT_LIMITS_UPDATED, TOPIC_DEX_POOL_CONFIGURED, TOPIC_DEX_SUPPLY,
-    TOPIC_DEX_WITHDRAW, TOPIC_EMERGENCY_HARVEST, TOPIC_EMERGENCY_PAUSED, TOPIC_HARVEST, TOPIC_INIT,
-    TOPIC_LIMITS_UPDATED, TOPIC_OWNERSHIP_CANCELLED, TOPIC_OWNERSHIP_INITIATED,
+    TOPIC_DEX_WITHDRAW, TOPIC_EMERGENCY_HARVEST, TOPIC_EMERGENCY_PAUSED, TOPIC_EMERGENCY_WITHDRAWAL,
+    TOPIC_HARVEST, TOPIC_INIT, TOPIC_LIMITS_UPDATED, TOPIC_MIGRATE, TOPIC_MIGRATION_PAUSED,
+    TOPIC_MIGRATION_TARGET_UPDATED, TOPIC_OWNERSHIP_CANCELLED, TOPIC_OWNERSHIP_INITIATED,
     TOPIC_OWNERSHIP_TRANSFERRED, TOPIC_PAUSED, TOPIC_PROTOCOL_CHANGED, TOPIC_REBALANCE,
-    TOPIC_REBALANCE_COOLDOWN_UPDATED, TOPIC_REBALANCE_FAILED, TOPIC_TVL_CAP_UPDATED,
-    TOPIC_UNPAUSED, TOPIC_UPGRADED, TOPIC_UPGRADE_CANCELLED, TOPIC_UPGRADE_SCHEDULED,
-    TOPIC_USER_CAP_UPDATED, TOPIC_USER_STRATEGY_UPDATED, TOPIC_WITHDRAW,
+    TOPIC_REBALANCE_COOLDOWN_UPDATED, TOPIC_REBALANCE_FAILED, TOPIC_SHARES_LOCKED,
+    TOPIC_SHARES_UNLOCKED, TOPIC_TVL_CAP_UPDATED, TOPIC_UNPAUSED, TOPIC_UPGRADED,
+    TOPIC_UPGRADE_CANCELLED, TOPIC_UPGRADE_SCHEDULED, TOPIC_USER_CAP_UPDATED,
+    TOPIC_USER_STRATEGY_UPDATED, TOPIC_WITHDRAW,
 };
 
 impl BlendPoolClient {

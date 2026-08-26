@@ -819,34 +819,6 @@ fn test_rebalance_exit_failure_leaves_protocol_unchanged() {
     let blend_client = MockBlendPoolClient::new(&env, &blend_pool);
 
     client.set_blend_pool(&owner, &blend_pool);
-// ─── Issue #383: pool-address rotation while funds are deployed ─────────────
-//
-// Companion to the `set_blend_pool`/`set_dex_pool` fund-stranding issue.
-// Neither setter currently guards against rotating the configured pool
-// address while a nonzero position is still deployed to the *old* pool:
-// every internal lookup (`get_protocol_balance`, `withdraw_from_blend`,
-// `withdraw_from_dex`) reads the pool address from storage *at call time*,
-// so once the address is rotated the vault permanently loses any way to see
-// or reach funds sitting in the old pool contract.
-//
-// Pre-fix, these tests document the stranding: the rotation succeeds
-// silently, and a subsequent `rebalance("none")` "succeeds" without
-// recovering any funds because the vault only ever queries the new (empty)
-// pool. Once a guard lands that rejects rotation while a position is
-// deployed, flip these assertions to expect the rotation call itself to
-// panic instead.
-
-#[test]
-fn test_blend_pool_rotation_while_deployed_strands_funds() {
-    let env = Env::default();
-    env.mock_all_auths();
-
-    let (contract_id, _agent, owner, usdc_token, old_pool) = setup_vault_with_token_and_blend(&env);
-    let client = NeuroWealthVaultClient::new(&env, &contract_id);
-    let token_client = TestTokenClient::new(&env, &usdc_token);
-    let old_pool_client = MockBlendPoolClient::new(&env, &old_pool);
-
-    client.set_blend_pool(&owner, &old_pool);
 
     let user = Address::generate(&env);
     let deposit_amount = 10_000_000_i128;
@@ -884,6 +856,42 @@ fn test_blend_pool_rotation_while_deployed_strands_funds() {
         idle + deployed,
         deposit_amount,
         "Total assets must be conserved after failed exit"
+    );
+}
+
+// ─── Issue #383: pool-address rotation while funds are deployed ─────────────
+//
+// Companion to the `set_blend_pool`/`set_dex_pool` fund-stranding issue.
+// Neither setter currently guards against rotating the configured pool
+// address while a nonzero position is still deployed to the *old* pool:
+// every internal lookup (`get_protocol_balance`, `withdraw_from_blend`,
+// `withdraw_from_dex`) reads the pool address from storage *at call time*,
+// so once the address is rotated the vault permanently loses any way to see
+// or reach funds sitting in the old pool contract.
+//
+// Pre-fix, these tests document the stranding: the rotation succeeds
+// silently, and a subsequent `rebalance("none")` "succeeds" without
+// recovering any funds because the vault only ever queries the new (empty)
+// pool. Once a guard lands that rejects rotation while a position is
+// deployed, flip these assertions to expect the rotation call itself to
+// panic instead.
+
+#[test]
+fn test_blend_pool_rotation_while_deployed_strands_funds() {
+    let env = Env::default();
+    env.mock_all_auths();
+
+    let (contract_id, _agent, owner, usdc_token, old_pool) = setup_vault_with_token_and_blend(&env);
+    let client = NeuroWealthVaultClient::new(&env, &contract_id);
+    let token_client = TestTokenClient::new(&env, &usdc_token);
+    let old_pool_client = MockBlendPoolClient::new(&env, &old_pool);
+
+    client.set_blend_pool(&owner, &old_pool);
+
+    let user = Address::generate(&env);
+    let deposit_amount = 10_000_000_i128;
+    mint_and_deposit(&env, &client, &usdc_token, &user, deposit_amount);
+
     // Deploy funds to the old pool.
     client.rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
     assert_eq!(old_pool_client.supplied(&usdc_token), deposit_amount);
