@@ -287,6 +287,20 @@ pub enum VaultError {
     HoldingPeriodNotElapsed = 75,
     /// Holding period configuration is invalid (must be non-negative) (#659).
     InvalidHoldingPeriod = 76,
+    /// Minimum withdrawal amount must be positive.
+    MinWithdrawalMustBePositive = 77,
+    /// Withdrawal amount is below the configured minimum.
+    BelowMinimumWithdrawal = 78,
+    /// Withdrawal queue is full.
+    QueueFull = 79,
+    /// Withdrawal queue is empty.
+    QueueEmpty = 80,
+    /// Withdrawal request was not found.
+    RequestNotFound = 81,
+    /// Withdrawal request has expired.
+    RequestExpired = 82,
+    /// Batch deposit size exceeds maximum allowed batch size.
+    MaxBatchSizeExceeded = 83,
 }
 
 impl VaultError {
@@ -466,6 +480,52 @@ pub enum DataKey {
     /// Written on every successful `deposit`. Used together with
     /// `MinHoldingPeriod` to enforce the flash-loan protection window.
     LastDepositLedger(Address),
+    /// Minimum withdrawal amount (#638)
+    MinWithdrawal,
+    /// Maximum withdrawal queue size (#639)
+    MaxQueueSize,
+    /// Withdrawal queue request TTL in seconds (#639)
+    QueueTtl,
+    /// Withdrawal queue head pointer (#639)
+    QueueHead,
+    /// Withdrawal queue tail pointer (#639)
+    QueueTail,
+    /// Withdrawal queue request entry (key: u64 request_id) (#639)
+    WithdrawalRequest(u64),
+    /// Maximum batch deposit size (#641)
+    MaxBatchSize,
+    /// User deposit timestamp (key: user Address) (#642)
+    UserDepositTimestamp(Address),
+    /// User accumulated deposited value (key: user Address) (#642)
+    UserDepositedValue(Address),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WithdrawalRequest {
+    pub request_id: u64,
+    pub user: Address,
+    pub amount: i128,
+    pub timestamp: u64,
+    pub fulfilled: bool,
+    pub cancelled: bool,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WithdrawalQueuedEvent {
+    pub request_id: u64,
+    pub user: Address,
+    pub amount: i128,
+    pub position: u64,
+    pub timestamp: u64,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BatchDepositItem {
+    pub user: Address,
+    pub amount: i128,
 }
 
 // ============================================================================
@@ -1866,6 +1926,20 @@ impl NeuroWealthVault {
             .persistent()
             .set(&DataKey::LastDepositLedger(user.clone()), &env.ledger().sequence());
 
+        // Record deposit timestamp & accumulated deposited value for APY tracking (#642)
+        let now_ts = env.ledger().timestamp();
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserDepositTimestamp(user.clone()), &now_ts);
+        let curr_val: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserDepositedValue(user.clone()))
+            .unwrap_or(0_i128);
+        env.storage()
+            .persistent()
+            .set(&DataKey::UserDepositedValue(user.clone()), &curr_val.saturating_add(amount));
+
         env.events().publish(
             (TOPIC_DEPOSIT, user.clone()),
             DepositEvent {
@@ -2063,6 +2137,16 @@ impl NeuroWealthVault {
 
         Self::require_not_paused(&env);
         Self::require_positive_amount(&env, amount);
+
+        // Enforce minimum withdrawal amount (#638)
+        let min_withdrawal: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinWithdrawal)
+            .unwrap_or(0_i128);
+        if min_withdrawal > 0 && amount < min_withdrawal {
+            panic_with_error!(&env, VaultError::BelowMinimumWithdrawal);
+        }
 
         // Flash-loan protection: enforce minimum holding period (#659).
         // If the owner has configured a non-zero MinHoldingPeriod, reject any
@@ -7610,6 +7694,278 @@ impl NeuroWealthVault {
         } else {
             0
         }
+    }
+
+    // ==========================================================================
+    // MINIMUM WITHDRAWAL PARAMETER (#638)
+    // ==========================================================================
+
+    /// Sets the minimum withdrawal amount parameter (owner-only).
+    pub fn set_min_withdrawal(env: Env, owner: Address, amount: i128) -> Result<(), VaultError> {
+        Self::require_initialized(&env);
+        owner.require_auth();
+        Self::require_owner(&env, &owner);
+        if amount <= 0 {
+            return Err(VaultError::MinWithdrawalMustBePositive);
+        }
+        env.storage().instance().set(&DataKey::MinWithdrawal, &amount);
+        Ok(())
+    }
+
+    /// Returns the minimum withdrawal amount.
+    pub fn get_min_withdrawal(env: Env) -> i128 {
+        Self::require_initialized(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::MinWithdrawal)
+            .unwrap_or(0_i128)
+    }
+
+    // ==========================================================================
+    // WITHDRAWAL QUEUE MECHANISM (#639)
+    // ==========================================================================
+
+    /// Configures the withdrawal queue parameters (owner-only).
+    pub fn set_queue_config(env: Env, owner: Address, max_size: u32, ttl_sec: u64) -> Result<(), VaultError> {
+        Self::require_initialized(&env);
+        owner.require_auth();
+        Self::require_owner(&env, &owner);
+        env.storage().instance().set(&DataKey::MaxQueueSize, &max_size);
+        env.storage().instance().set(&DataKey::QueueTtl, &ttl_sec);
+        Ok(())
+    }
+
+    /// Returns the withdrawal queue max size and TTL config.
+    pub fn get_queue_config(env: Env) -> (u32, u64) {
+        Self::require_initialized(&env);
+        let max_size = env.storage().instance().get(&DataKey::MaxQueueSize).unwrap_or(100u32);
+        let ttl = env.storage().instance().get(&DataKey::QueueTtl).unwrap_or(86400u64);
+        (max_size, ttl)
+    }
+
+    /// Enqueues a withdrawal request when protocol liquidity is constrained.
+    pub fn queue_withdrawal(env: Env, user: Address, amount: i128) -> u64 {
+        Self::require_initialized(&env);
+        user.require_auth();
+        Self::require_positive_amount(&env, amount);
+
+        let (max_size, _ttl) = Self::get_queue_config(env.clone());
+        let head: u64 = env.storage().instance().get(&DataKey::QueueHead).unwrap_or(0);
+        let tail: u64 = env.storage().instance().get(&DataKey::QueueTail).unwrap_or(0);
+
+        let current_queue_len = tail.saturating_sub(head);
+        if current_queue_len >= max_size as u64 {
+            panic_with_error!(&env, VaultError::QueueFull);
+        }
+
+        let request_id = tail + 1;
+        let now = env.ledger().timestamp();
+
+        let request = WithdrawalRequest {
+            request_id,
+            user: user.clone(),
+            amount,
+            timestamp: now,
+            fulfilled: false,
+            cancelled: false,
+        };
+
+        env.storage().persistent().set(&DataKey::WithdrawalRequest(request_id), &request);
+        env.storage().instance().set(&DataKey::QueueTail, &request_id);
+
+        env.events().publish(
+            (symbol_short!("queue"), user.clone()),
+            WithdrawalQueuedEvent {
+                request_id,
+                user: user.clone(),
+                amount,
+                position: current_queue_len + 1,
+                timestamp: now,
+            },
+        );
+
+        request_id
+    }
+
+    /// Processes pending withdrawal queue requests in FIFO order (agent or owner).
+    pub fn process_withdrawal_queue(env: Env, caller: Address, batch_size: u32) -> u32 {
+        Self::require_initialized(&env);
+        caller.require_auth();
+
+        let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
+        let agent: Option<Address> = env.storage().instance().get(&DataKey::Agent);
+
+        if caller != owner && agent.as_ref() != Some(&caller) {
+            panic_with_error!(&env, VaultError::CallerIsNotOwner);
+        }
+
+        let (_max_size, ttl) = Self::get_queue_config(env.clone());
+        let mut head: u64 = env.storage().instance().get(&DataKey::QueueHead).unwrap_or(0);
+        let tail: u64 = env.storage().instance().get(&DataKey::QueueTail).unwrap_or(0);
+
+        let mut processed = 0u32;
+        let now = env.ledger().timestamp();
+
+        while head < tail && processed < batch_size {
+            head += 1;
+            if let Some(mut req) = env.storage().persistent().get::<DataKey, WithdrawalRequest>(&DataKey::WithdrawalRequest(head)) {
+                if req.fulfilled || req.cancelled {
+                    continue;
+                }
+
+                if ttl > 0 && now > req.timestamp.saturating_add(ttl) {
+                    req.cancelled = true;
+                    env.storage().persistent().set(&DataKey::WithdrawalRequest(head), &req);
+                    continue;
+                }
+
+                req.fulfilled = true;
+                env.storage().persistent().set(&DataKey::WithdrawalRequest(head), &req);
+                processed += 1;
+            }
+        }
+
+        env.storage().instance().set(&DataKey::QueueHead, &head);
+        processed
+    }
+
+    /// Cancels a queued withdrawal request (user-only).
+    pub fn cancel_withdrawal_request(env: Env, user: Address, request_id: u64) {
+        Self::require_initialized(&env);
+        user.require_auth();
+
+        let mut req: WithdrawalRequest = env
+            .storage()
+            .persistent()
+            .get(&DataKey::WithdrawalRequest(request_id))
+            .expect("request not found");
+
+        if req.user != user {
+            panic_with_error!(&env, VaultError::CallerIsNotOwner);
+        }
+
+        if req.fulfilled || req.cancelled {
+            return;
+        }
+
+        req.cancelled = true;
+        env.storage().persistent().set(&DataKey::WithdrawalRequest(request_id), &req);
+    }
+
+    /// Gets details for a queued withdrawal request.
+    pub fn get_withdrawal_request(env: Env, request_id: u64) -> Option<WithdrawalRequest> {
+        Self::require_initialized(&env);
+        env.storage().persistent().get(&DataKey::WithdrawalRequest(request_id))
+    }
+
+    // ==========================================================================
+    // BATCH DEPOSIT FUNCTION (#641)
+    // ==========================================================================
+
+    /// Sets the maximum allowed batch deposit size (owner-only).
+    pub fn set_max_batch_size(env: Env, owner: Address, max_size: u32) -> Result<(), VaultError> {
+        Self::require_initialized(&env);
+        owner.require_auth();
+        Self::require_owner(&env, &owner);
+        env.storage().instance().set(&DataKey::MaxBatchSize, &max_size);
+        Ok(())
+    }
+
+    /// Gets the maximum allowed batch deposit size.
+    pub fn get_max_batch_size(env: Env) -> u32 {
+        Self::require_initialized(&env);
+        env.storage().instance().get(&DataKey::MaxBatchSize).unwrap_or(50u32)
+    }
+
+    /// Batch deposit function allowing agent or owner to process multiple user deposits.
+    pub fn batch_deposit(env: Env, caller: Address, deposits: Vec<BatchDepositItem>) {
+        Self::require_initialized(&env);
+        caller.require_auth();
+
+        let owner: Address = env.storage().instance().get(&DataKey::Owner).unwrap();
+        let agent: Option<Address> = env.storage().instance().get(&DataKey::Agent);
+
+        if caller != owner && agent.as_ref() != Some(&caller) {
+            panic_with_error!(&env, VaultError::CallerIsNotOwner);
+        }
+
+        let max_batch = Self::get_max_batch_size(env.clone());
+        if deposits.len() > max_batch {
+            panic_with_error!(&env, VaultError::MaxBatchSizeExceeded);
+        }
+
+        let mut total_batch_amount = 0i128;
+        for item in deposits.iter() {
+            total_batch_amount = total_batch_amount
+                .checked_add(item.amount)
+                .expect("batch_deposit: total amount overflow");
+        }
+
+        Self::require_within_tvl_cap(&env, total_batch_amount);
+
+        for item in deposits.iter() {
+            Self::deposit(env.clone(), item.user.clone(), item.amount);
+        }
+    }
+
+    // ==========================================================================
+    // USER DEPOSIT TIMESTAMP & REALIZED APY (#642)
+    // ==========================================================================
+
+    /// Gets the last deposit timestamp for a user.
+    pub fn get_user_deposit_timestamp(env: Env, user: Address) -> u64 {
+        Self::require_initialized(&env);
+        env.storage()
+            .persistent()
+            .get(&DataKey::UserDepositTimestamp(user))
+            .unwrap_or(0u64)
+    }
+
+    /// Calculates user's realized APY based on deposit timestamp and current valuation.
+    pub fn get_user_realized_apy(env: Env, user: Address) -> i128 {
+        Self::require_initialized(&env);
+
+        let shares: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Shares(user.clone()))
+            .unwrap_or(0_i128);
+        if shares == 0 {
+            return 0;
+        }
+
+        let deposited_val: i128 = env
+            .storage()
+            .persistent()
+            .get(&DataKey::UserDepositedValue(user.clone()))
+            .unwrap_or(0_i128);
+        if deposited_val <= 0 {
+            return 0;
+        }
+
+        let current_val = Self::convert_to_assets_internal(&env, shares);
+        if current_val <= deposited_val {
+            return 0;
+        }
+
+        let deposit_ts = Self::get_user_deposit_timestamp(env.clone(), user);
+        if deposit_ts == 0 {
+            return 0;
+        }
+
+        let now = env.ledger().timestamp();
+        if now <= deposit_ts {
+            return 0;
+        }
+
+        let seconds_held = now - deposit_ts;
+        let days_held = seconds_held / 86400;
+        if days_held == 0 {
+            return 0;
+        }
+
+        let gain = current_val - deposited_val;
+        (gain.saturating_mul(365).saturating_mul(100)) / (deposited_val.saturating_mul(days_held as i128))
     }
 }
 
