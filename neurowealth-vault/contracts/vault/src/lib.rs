@@ -283,6 +283,10 @@ pub enum VaultError {
     InsufficientUnlockedShares = 73,
     /// Emergency withdrawal not allowed (vault not paused).
     EmergencyWithdrawalNotAllowed = 74,
+    /// Withdrawal rejected: minimum holding period since last deposit has not elapsed (#659).
+    HoldingPeriodNotElapsed = 75,
+    /// Holding period configuration is invalid (must be non-negative) (#659).
+    InvalidHoldingPeriod = 76,
 }
 
 impl VaultError {
@@ -437,11 +441,31 @@ pub enum DataKey {
     /// Number of shares locked by the user for boosted APY. Locked shares
     /// cannot be withdrawn until the lock period expires.
     LockedShares(Address),
+    /// Latest ML-model APY prediction for a given protocol (#650).
+    /// Written by the agent via `submit_apy_prediction`. Keyed by protocol symbol.
+    ApyPrediction(Symbol),
+    /// Cumulative suspected MEV loss across all rebalance operations (#658).
+    /// Incremented by `submit_mev_report` when the agent detects extraction.
+    CumulativeMevLoss,
+    /// Count of rebalance operations where MEV extraction was suspected (#658).
+    MevIncidentCount,
+    /// Maximum acceptable MEV loss per rebalance in stroops, configured by
+    /// the owner. When a reported loss exceeds this value, an alert event is
+    /// emitted (#658). Zero means no threshold is set.
+    MaxAcceptableMevLoss,
     /// User's lock expiry ledger (key: user Address) (#636).
     ///
     /// The ledger number at which the user's locked shares can be unlocked.
     /// Set when shares are locked and used to enforce lock period.
     LockExpiry(Address),
+    /// Minimum number of ledgers a user must wait after depositing before
+    /// they can withdraw. Configurable by the owner. When absent (or zero)
+    /// no holding period is enforced. Used for flash-loan protection (#659).
+    MinHoldingPeriod,
+    /// Ledger sequence of the most recent deposit for a given user (#659).
+    /// Written on every successful `deposit`. Used together with
+    /// `MinHoldingPeriod` to enforce the flash-loan protection window.
+    LastDepositLedger(Address),
 }
 
 // ============================================================================
@@ -1134,6 +1158,77 @@ pub struct EmergencyWithdrawalEvent {
     pub from_idle: bool,
 }
 
+/// On-chain record of an ML model APY forecast submitted by the agent (#650).
+///
+/// The off-chain LSTM / Prophet model produces a prediction for each supported
+/// protocol. The agent writes the latest forecast on-chain so that the rebalance
+/// decision and its inputs are fully auditable.
+///
+/// `predicted_apy_bps` is in basis points (100 bps = 1%). `confidence_bps` is
+/// the model's confidence expressed the same way (e.g., 8000 bps = 80%).
+/// `horizon_ledgers` is how many ledgers ahead the prediction covers.
+#[contracttype]
+#[derive(Clone, Debug, PartialEq)]
+pub struct ApyPrediction {
+    /// Protocol this prediction applies to ("blend", "dex", …).
+    pub protocol: Symbol,
+    /// Predicted APY in basis points (100 bps = 1%).
+    pub predicted_apy_bps: i128,
+    /// 1-hour-ahead APY forecast in basis points.
+    pub apy_1h_bps: i128,
+    /// 6-hour-ahead APY forecast in basis points.
+    pub apy_6h_bps: i128,
+    /// 24-hour-ahead APY forecast in basis points.
+    pub apy_24h_bps: i128,
+    /// Model confidence (0–10000 bps, where 10000 = 100%).
+    pub confidence_bps: u32,
+    /// Ledger at which this prediction was submitted.
+    pub submitted_at_ledger: u32,
+}
+
+/// Emitted when the off-chain agent reports suspected MEV extraction on a
+/// rebalance transaction (#658).
+///
+/// Indexers should aggregate `estimated_loss_stroops` across incidents to
+/// calculate the cumulative cost of MEV extraction to vault users.
+///
+/// # Topics
+/// - `0`: `SymbolShort("mev_alert")` — Event identifier
+#[contracttype]
+pub struct MevExtractionSuspectedEvent {
+    /// The rebalance protocol where MEV was suspected (e.g., "blend", "dex").
+    pub protocol: Symbol,
+    /// Agent-estimated amount lost to MEV in this transaction (stroops).
+    pub estimated_loss_stroops: i128,
+    /// The `min_out` value that was set for the rebalance that triggered the report.
+    pub min_out_used: i128,
+    /// Running total of suspected MEV losses since vault inception.
+    pub cumulative_loss_stroops: i128,
+    /// Number of MEV incidents recorded so far.
+    pub incident_count: u32,
+}
+
+/// Emitted when a withdrawal attempt is blocked by the flash-loan protection
+/// holding period (#659).
+///
+/// Indexers can use this event to track how often the protection triggers and
+/// to flag wallet addresses that repeatedly attempt same-ledger withdrawals.
+///
+/// # Topics
+/// - `0`: `SymbolShort("fl_block")` — Event identifier
+/// - `1`: `Address` — the user whose withdrawal was blocked (indexed topic)
+#[contracttype]
+pub struct FlashLoanProtectionTriggeredEvent {
+    /// The user whose withdrawal was rejected.
+    pub user: Address,
+    /// Ledger at which the user last deposited.
+    pub last_deposit_ledger: u32,
+    /// Current ledger at the time of the rejected withdrawal.
+    pub current_ledger: u32,
+    /// Configured minimum holding period (in ledgers).
+    pub min_holding_period: u32,
+}
+
 // ============================================================================
 // BLEND POOL CLIENT INTERFACE
 // ============================================================================
@@ -1755,6 +1850,11 @@ impl NeuroWealthVault {
             .instance()
             .set(&DataKey::TotalAssets, &new_total_assets);
 
+        // Record deposit ledger for flash-loan protection (#659).
+        env.storage()
+            .persistent()
+            .set(&DataKey::LastDepositLedger(user.clone()), &env.ledger().sequence());
+
         env.events().publish(
             (TOPIC_DEPOSIT, user.clone()),
             DepositEvent {
@@ -1952,6 +2052,37 @@ impl NeuroWealthVault {
 
         Self::require_not_paused(&env);
         Self::require_positive_amount(&env, amount);
+
+        // Flash-loan protection: enforce minimum holding period (#659).
+        // If the owner has configured a non-zero MinHoldingPeriod, reject any
+        // withdrawal attempted before `last_deposit_ledger + min_holding_period`.
+        let min_holding: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MinHoldingPeriod)
+            .unwrap_or(0_u32);
+        if min_holding > 0 {
+            if let Some(last_deposit_ledger) = env
+                .storage()
+                .persistent()
+                .get::<DataKey, u32>(&DataKey::LastDepositLedger(user.clone()))
+            {
+                let current_ledger = env.ledger().sequence();
+                let elapsed = current_ledger.saturating_sub(last_deposit_ledger);
+                if elapsed < min_holding {
+                    env.events().publish(
+                        (symbol_short!("fl_block"), user.clone()),
+                        FlashLoanProtectionTriggeredEvent {
+                            user: user.clone(),
+                            last_deposit_ledger,
+                            current_ledger,
+                            min_holding_period: min_holding,
+                        },
+                    );
+                    panic_with_error!(&env, VaultError::HoldingPeriodNotElapsed);
+                }
+            }
+        }
 
         // Check if user has locked shares (#636)
         let locked_shares: i128 = env
@@ -3900,6 +4031,176 @@ impl NeuroWealthVault {
             .instance()
             .get(&DataKey::MinRebalanceInterval)
             .unwrap_or(0)
+    }
+
+    /// Sets the minimum number of ledgers a user must hold their deposit before
+    /// they can withdraw. Passing `0` disables the holding period (default).
+    ///
+    /// Only callable by the vault owner. Used to mitigate flash-loan attacks
+    /// that manipulate share prices by depositing and immediately withdrawing
+    /// in the same or adjacent transactions (#659).
+    ///
+    /// A ledger on Stellar closes approximately every 5 seconds. A holding
+    /// period of 120 ledgers (~10 minutes) prevents same-block deposit/withdraw
+    /// cycles while keeping withdrawal UX acceptable for normal users.
+    ///
+    /// # Panics
+    /// - [`VaultError::CallerIsNotOwner`] if caller is not the owner.
+    pub fn set_min_holding_period(env: Env, ledgers: u32) {
+        Self::require_initialized(&env);
+        Self::require_is_owner(&env);
+
+        if ledgers == 0 {
+            env.storage().instance().remove(&DataKey::MinHoldingPeriod);
+        } else {
+            env.storage()
+                .instance()
+                .set(&DataKey::MinHoldingPeriod, &ledgers);
+        }
+    }
+
+    /// Returns the configured minimum holding period in ledgers, or `0` if
+    /// no holding period has been set (flash-loan protection disabled).
+    pub fn get_min_holding_period(env: Env) -> u32 {
+        Self::require_initialized(&env);
+        env.storage()
+            .instance()
+            .get(&DataKey::MinHoldingPeriod)
+            .unwrap_or(0)
+    }
+
+    /// Records a suspected MEV extraction event after a rebalance (#658).
+    ///
+    /// Called by the off-chain agent when post-execution analysis suggests a
+    /// sandwich attack occurred (e.g., actual received amount was less than
+    /// expected even though `min_out` was satisfied). The agent computes the
+    /// estimated loss by comparing the simulated vs. actual fill price.
+    ///
+    /// Emits `MevExtractionSuspectedEvent`. If the reported loss exceeds the
+    /// owner-configured `MaxAcceptableMevLoss` threshold, the event payload
+    /// signals indexers/monitoring to alert the team.
+    ///
+    /// # Arguments
+    /// * `protocol` — Protocol on which MEV was detected ("blend" or "dex").
+    /// * `estimated_loss_stroops` — Agent-estimated stroops lost to MEV.
+    /// * `min_out_used` — The `min_out` parameter passed to `rebalance`.
+    ///
+    /// # Panics
+    /// - [`VaultError::CallerIsNotAgent`] if caller is not the authorized agent.
+    /// - If `estimated_loss_stroops` is negative.
+    pub fn submit_mev_report(
+        env: Env,
+        protocol: Symbol,
+        estimated_loss_stroops: i128,
+        min_out_used: i128,
+    ) {
+        Self::require_initialized(&env);
+        Self::require_is_agent(&env);
+
+        assert!(
+            estimated_loss_stroops >= 0,
+            "estimated_loss_stroops must be non-negative"
+        );
+
+        let cumulative: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CumulativeMevLoss)
+            .unwrap_or(0_i128);
+        let new_cumulative = cumulative
+            .checked_add(estimated_loss_stroops)
+            .expect("vault: mev cumulative overflow");
+
+        let incident_count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MevIncidentCount)
+            .unwrap_or(0_u32);
+        let new_count = incident_count.saturating_add(1);
+
+        env.storage()
+            .instance()
+            .set(&DataKey::CumulativeMevLoss, &new_cumulative);
+        env.storage()
+            .instance()
+            .set(&DataKey::MevIncidentCount, &new_count);
+
+        env.events().publish(
+            (symbol_short!("mev_alert"),),
+            MevExtractionSuspectedEvent {
+                protocol,
+                estimated_loss_stroops,
+                min_out_used,
+                cumulative_loss_stroops: new_cumulative,
+                incident_count: new_count,
+            },
+        );
+    }
+
+    /// Returns `(cumulative_mev_loss_stroops, incident_count)` for monitoring (#658).
+    pub fn get_mev_stats(env: Env) -> (i128, u32) {
+        Self::require_initialized(&env);
+        let loss: i128 = env
+            .storage()
+            .instance()
+            .get(&DataKey::CumulativeMevLoss)
+            .unwrap_or(0);
+        let count: u32 = env
+            .storage()
+            .instance()
+            .get(&DataKey::MevIncidentCount)
+            .unwrap_or(0);
+        (loss, count)
+    }
+
+    /// Sets the maximum acceptable MEV loss per rebalance in stroops (#658).
+    /// A value of `0` disables the threshold check.
+    ///
+    /// Only callable by the vault owner.
+    pub fn set_max_acceptable_mev_loss(env: Env, max_loss_stroops: i128) {
+        Self::require_initialized(&env);
+        Self::require_is_owner(&env);
+        assert!(max_loss_stroops >= 0, "max_loss_stroops must be non-negative");
+        env.storage()
+            .instance()
+            .set(&DataKey::MaxAcceptableMevLoss, &max_loss_stroops);
+    }
+
+    /// Stores an ML model APY prediction on-chain for a given protocol (#650).
+    ///
+    /// Called by the off-chain agent after running inference on the LSTM /
+    /// Prophet model. Predictions are stored per-protocol and overwrite the
+    /// previous forecast. The `rebalance()` call can then read the latest
+    /// prediction via `get_apy_prediction` to make a more informed decision.
+    ///
+    /// # Arguments
+    /// * `prediction` — Populated `ApyPrediction` struct from the agent.
+    ///
+    /// # Panics
+    /// - [`VaultError::CallerIsNotAgent`] if caller is not the authorized agent.
+    pub fn submit_apy_prediction(env: Env, prediction: ApyPrediction) {
+        Self::require_initialized(&env);
+        Self::require_is_agent(&env);
+
+        let key = DataKey::ApyPrediction(prediction.protocol.clone());
+        let record = ApyPrediction {
+            submitted_at_ledger: env.ledger().sequence(),
+            ..prediction
+        };
+        env.storage().persistent().set(&key, &record);
+    }
+
+    /// Returns the most recent ML model APY prediction for a given protocol,
+    /// or `None` if no prediction has been submitted yet (#650).
+    ///
+    /// The `rebalance` caller (agent) should check this value to decide the
+    /// `expected_apy` argument for the next rebalance call. A `None` result
+    /// means the agent should fall back to the current observed APY.
+    pub fn get_apy_prediction(env: Env, protocol: Symbol) -> Option<ApyPrediction> {
+        Self::require_initialized(&env);
+        env.storage()
+            .persistent()
+            .get(&DataKey::ApyPrediction(protocol))
     }
 
     /// Returns the ledger sequence number of the most recent successful

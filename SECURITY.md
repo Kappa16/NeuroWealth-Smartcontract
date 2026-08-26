@@ -257,6 +257,13 @@ This register documents every owner-only and agent-only capability, the blast ra
 | accept_ownership | - | - | - | pending owner |
 | touch_user_ttl | - | - | - | anyone |
 | set_user_strategy | - | - | yes | - |
+| set_min_holding_period | yes | - | - | - |
+| get_min_holding_period | - | - | - | anyone |
+| submit_mev_report | - | yes | - | - |
+| get_mev_stats | - | - | - | anyone |
+| set_max_acceptable_mev_loss | yes | - | - | - |
+| submit_apy_prediction | - | yes | - | - |
+| get_apy_prediction | - | - | - | anyone |
 
 ### Emergency Harvest Fallback (Issue #506)
 
@@ -571,6 +578,117 @@ stellar contract invoke \
 - Revoke and rotate all credentials that were co-located with the compromised key.
 - Publish a post-mortem within 72 hours.
 - Consider migrating to a multi-sig owner address before resuming normal operations.
+
+---
+
+## Flash-Loan Attack Threat Model (Issue #659)
+
+### Attack Vector
+
+A flash-loan attack against a yield vault exploits the fact that an attacker can
+deposit a very large amount, trigger a favourable state change (harvest, rebalance,
+or share-price update), and withdraw in the same transaction — or across a very
+small number of consecutive ledgers — to extract yield that belongs to long-term
+depositors.
+
+### Mitigation: Minimum Holding Period
+
+The vault enforces a configurable minimum holding period tracked per user:
+
+| Storage key | Type | Description |
+|-------------|------|-------------|
+| `DataKey::MinHoldingPeriod` | `u32` (instance) | Minimum ledgers a user must hold their deposit before withdrawal is allowed. `0` = disabled. |
+| `DataKey::LastDepositLedger(Address)` | `u32` (persistent) | Ledger sequence at which the user most recently deposited. |
+
+**On deposit**: `LastDepositLedger(user)` is set to `env.ledger().sequence()`.
+
+**On withdraw**: If `MinHoldingPeriod > 0` and `current_ledger - LastDepositLedger < MinHoldingPeriod`,
+the transaction panics with `VaultError::HoldingPeriodNotElapsed (#75)` and emits a
+`FlashLoanProtectionTriggeredEvent` (topic `fl_block`).
+
+### Recommended Configuration
+
+On mainnet, set the holding period to at least 1 ledger (≈ 5 seconds) during
+initial deployment, and tighten to 120–240 ledgers (10–20 minutes) after TVL
+exceeds a meaningful threshold. The owner can update the period at any time via
+`set_min_holding_period`.
+
+### Access Control
+
+| Function | Role |
+|----------|------|
+| `set_min_holding_period(env, ledgers)` | Owner only |
+| `get_min_holding_period(env) -> u32` | Anyone |
+
+Setting `ledgers = 0` disables flash-loan protection entirely (acceptable on
+testnet; not recommended for mainnet once funds are deployed).
+
+### Error Codes
+
+| Code | Variant | Condition |
+|------|---------|-----------|
+| `#75` | `HoldingPeriodNotElapsed` | `current_ledger - last_deposit < min_holding` |
+| `#76` | `InvalidHoldingPeriod` | Reserved for future validation (e.g., period > hard cap) |
+
+---
+
+## MEV Protection Threat Model (Issue #658)
+
+### Attack Vector
+
+Maximal Extractable Value (MEV) in the context of this vault arises during
+rebalances, where an agent-submitted transaction moves assets between protocols
+(Blend → DEX, etc.). An adversary who can observe pending rebalance transactions
+can front-run or sandwich-attack the swap, extracting value from the vault at
+the expense of depositors.
+
+### Mitigation: On-Chain MEV Incident Tracking
+
+The vault does not currently block MEV extraction on-chain (MEV largely occurs
+at the sequencing layer, outside of contract logic). Instead, it implements
+**on-chain observability** so the agent can react and governance can act:
+
+| Storage key | Type | Description |
+|-------------|------|-------------|
+| `DataKey::CumulativeMevLoss` | `i128` (instance) | Running total of estimated loss in stroops across all reported incidents. |
+| `DataKey::MevIncidentCount` | `u32` (instance) | Number of MEV incidents reported. |
+| `DataKey::MaxAcceptableMevLoss` | `i128` (instance) | Owner-configured threshold; agent should pause rebalances above this. |
+
+**Reporting flow**:
+
+1. After each rebalance, the off-chain agent compares `min_out` to the actual
+   amount received. If the difference exceeds a configured threshold, it calls
+   `submit_mev_report(protocol, estimated_loss_stroops, min_out_used)`.
+2. The contract increments `CumulativeMevLoss` and `MevIncidentCount` and emits
+   a `MevExtractionSuspectedEvent` (topic `mev_susp`) for indexers.
+3. Governance (owner) monitors cumulative loss via `get_mev_stats()`. If
+   `CumulativeMevLoss > MaxAcceptableMevLoss`, the agent should halt rebalances
+   and wait for owner review.
+
+### Access Control
+
+| Function | Role |
+|----------|------|
+| `submit_mev_report(env, protocol, estimated_loss_stroops, min_out_used)` | Agent only |
+| `get_mev_stats(env) -> (i128, u32)` | Anyone |
+| `set_max_acceptable_mev_loss(env, max_loss_stroops)` | Owner only |
+
+### Off-Chain Recommendations
+
+- Set `min_out` on every `rebalance()` call to bound slippage on-chain (current
+  implementation uses `min_out` to revert if output is below the threshold).
+- Use a private mempool or Stellar's fee-bump transactions to reduce the window
+  for front-running.
+- Rotate rebalance timing randomly to prevent predictable extraction patterns.
+- Monitor `MevExtractionSuspectedEvent` events via an indexer; alert if more than
+  3 incidents occur within 100 ledgers.
+
+### Centralization-Risk Register Update
+
+| Capability | Role | Blast Radius | Mitigation |
+|------------|------|--------------|------------|
+| `submit_mev_report` | Agent | Falsely inflated `CumulativeMevLoss` could trigger premature rebalance halt. | Accepted risk; only the agent key can submit reports, and the owner can reset caps via `set_max_acceptable_mev_loss`. |
+| `set_max_acceptable_mev_loss` | Owner | Setting to 0 would block any rebalance after the first reported incident. | Accepted risk; owner configuration change. |
 
 ---
 
