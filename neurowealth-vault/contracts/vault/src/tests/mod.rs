@@ -16,7 +16,7 @@ mod test_checked_arithmetic;
 mod test_circuit_breaker;
 mod test_concurrent_timelocks;
 mod test_deposit;
-#[cfg(feature = "dex-devnet")]
+[cfg(feature = "dex-devnet")]
 mod test_dex_devnet;
 mod test_dex_integration;
 mod test_emergency_harvest;
@@ -65,8 +65,8 @@ mod utils;
 
 mod test_liquidity_mining_rewards;
 mod test_performance_fee;
-mod test_min_withdrawal;
+mod test_min_withdraw;
 mod test_withdrawal_queue;
 mod test_batch_deposit;
 mod test_user_apy;
-
+mod test_insurance_fund;
