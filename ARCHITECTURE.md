@@ -1094,3 +1094,14 @@ The `NeuroWealthVault` contract interacts with three categories of external smar
   - *Loss*: Decreases require owner co-signatures (`require_is_owner`) and are hard-capped at `max_decrease_bps` (minimum cap floor 100 bps / 1%, default 10%).
 - **Verification**: Covered by [`test_asset_decrease.rs`](neurowealth-vault/contracts/vault/src/tests/test_asset_decrease.rs) and [`test_update_total_assets_blend.rs`](neurowealth-vault/contracts/vault/src/tests/test_update_total_assets_blend.rs).
 
+
+---
+
+## Performance Fee Structure
+
+The protocol charges a configurable performance fee on earned yield to fund maintenance, monitoring infrastructure, and gas reimbursements.
+
+- **Data Key**: `DataKey::PerformanceFeeBps`
+- **Maximum Cap**: 1,000 basis points (10.00%) strictly enforced at the smart contract level (`FeeExceedsMaximum` error on violations)
+- **Settlement**: Deducted from harvested yield during auto-compounding cycles and directed to the configured Treasury address
+- **Events**: Emits `PerformanceFeeEvent { treasury, yield_gross, fee_amount, bps }`
