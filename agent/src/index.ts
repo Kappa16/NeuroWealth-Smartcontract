@@ -4,6 +4,10 @@ import { startEventListener, stopEventListener, server, pool } from './eventList
 import { evaluateYield } from './yieldComparison';
 import healthRouter, { configureHealthChecks } from './health';
 import logger from './logger';
+import { initializeTracing } from './tracing';
+
+// Initialize OpenTelemetry tracing
+initializeTracing();
 
 const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
