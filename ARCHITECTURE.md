@@ -648,16 +648,17 @@ All read functions return the requested data or 0/default if not set.
 ## Ledger Resource Baselines (Issue #203)
 
 Measured in the Soroban simulator against `soroban-env-host 21.2.1` with the
-MockBlendPool and TestToken test helpers.  Upper bounds used as soft regression
-gates in `tests/test_budget.rs`.
+MockBlendPool and TestToken test helpers. Upper bounds used as strict regression
+gates (baseline + 10% tolerance) in `tests/test_budget.rs`.
 
 | Operation | CPU instructions | Memory bytes |
 |-----------|------------------|--------------|
-| | `deposit` | < 5 000 000 | < 300 000 |
-| | `withdraw` (no Blend) | < 5 000 000 | < 300 000 |
-| | `withdraw` (Blend pull) | < 15 000 000 | < 600 000 |
-| | `rebalance → blend` | < 15 000 000 | < 600 000 |
-| | `rebalance → none` | < 15 000 000 | < 600 000 |
+| | `deposit` | 4,500,000 + 10% | 270,000 + 10% |
+| | `withdraw` (no Blend) | 4,500,000 + 10% | 270,000 + 10% |
+| | `withdraw` (Blend pull) | 13,500,000 + 10% | 540,000 + 10% |
+| | `rebalance → blend` | 13,500,000 + 10% | 540,000 + 10% |
+| | `rebalance → none` | 13,500,000 + 10% | 540,000 + 10% |
+| | `harvest` | 13,500,000 + 10% | 540,000 + 10% |
 
 Cross-contract operations (Blend supply/withdraw) cost roughly 3× a simple
 deposit because each `invoke_contract` carries its own CPU and memory overhead.

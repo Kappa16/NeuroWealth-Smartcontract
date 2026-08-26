@@ -29,6 +29,13 @@ fn measure<F: FnOnce()>(env: &Env, f: F) -> (u64, u64) {
     )
 }
 
+fn check_baseline(name: &str, cpu: u64, mem: u64, base_cpu: u64, base_mem: u64) {
+    let max_cpu = base_cpu + (base_cpu / 10);
+    let max_mem = base_mem + (base_mem / 10);
+    assert!(cpu <= max_cpu, "{} CPU cost regressed! Expected <= {} (baseline {} + 10%) but got {}", name, max_cpu, base_cpu, cpu);
+    assert!(mem <= max_mem, "{} memory cost regressed! Expected <= {} (baseline {} + 10%) but got {}", name, max_mem, base_mem, mem);
+}
+
 // ============================================================================
 // Issue #203 – deposit budget
 // ============================================================================
@@ -52,9 +59,8 @@ fn test_budget_deposit() {
 
     std::println!("[budget] deposit  cpu={cpu}  mem={mem}");
 
-    // Soft upper bounds — tighten after profiling stabilises
-    assert!(cpu < 5_000_000, "deposit CPU cost regressed: {cpu}");
-    assert!(mem < 300_000, "deposit memory cost regressed: {mem}");
+    // Strict 10% tolerance over baseline
+    check_baseline("deposit", cpu, mem, 4_500_000, 270_000);
 }
 
 // ============================================================================
@@ -79,8 +85,7 @@ fn test_budget_withdraw_no_blend() {
 
     std::println!("[budget] withdraw (no Blend)  cpu={cpu}  mem={mem}");
 
-    assert!(cpu < 5_000_000, "withdraw CPU cost regressed: {cpu}");
-    assert!(mem < 300_000, "withdraw memory cost regressed: {mem}");
+    check_baseline("withdraw_no_blend", cpu, mem, 4_500_000, 270_000);
 }
 
 // ============================================================================
@@ -111,15 +116,7 @@ fn test_budget_withdraw_with_blend_pull() {
 
     std::println!("[budget] withdraw (Blend pull)  cpu={cpu}  mem={mem}");
 
-    // Cross-contract calls are more expensive; allow a wider bound
-    assert!(
-        cpu < 15_000_000,
-        "withdraw-with-Blend CPU cost regressed: {cpu}"
-    );
-    assert!(
-        mem < 600_000,
-        "withdraw-with-Blend memory cost regressed: {mem}"
-    );
+    check_baseline("withdraw_with_blend", cpu, mem, 13_500_000, 540_000);
 }
 
 // ============================================================================
@@ -146,8 +143,7 @@ fn test_budget_rebalance_to_blend() {
 
     std::println!("[budget] rebalance → blend  cpu={cpu}  mem={mem}");
 
-    assert!(cpu < 15_000_000, "rebalance CPU cost regressed: {cpu}");
-    assert!(mem < 600_000, "rebalance memory cost regressed: {mem}");
+    check_baseline("rebalance_to_blend", cpu, mem, 13_500_000, 540_000);
 }
 
 #[test]
@@ -171,14 +167,7 @@ fn test_budget_rebalance_to_none() {
 
     std::println!("[budget] rebalance → none  cpu={cpu}  mem={mem}");
 
-    assert!(
-        cpu < 15_000_000,
-        "rebalance-to-none CPU cost regressed: {cpu}"
-    );
-    assert!(
-        mem < 600_000,
-        "rebalance-to-none memory cost regressed: {mem}"
-    );
+    check_baseline("rebalance_to_none", cpu, mem, 13_500_000, 540_000);
 }
 
 // ============================================================================
@@ -208,8 +197,5 @@ fn test_budget_harvest() {
 
     std::println!("[budget] harvest  cpu={cpu}  mem={mem}");
 
-    // harvest does a withdraw + supply round trip through Blend, similar
-    // in cost to a full rebalance; allow the same upper bounds.
-    assert!(cpu < 15_000_000, "harvest CPU cost regressed: {cpu}");
-    assert!(mem < 600_000, "harvest memory cost regressed: {mem}");
+    check_baseline("harvest", cpu, mem, 13_500_000, 540_000);
 }
