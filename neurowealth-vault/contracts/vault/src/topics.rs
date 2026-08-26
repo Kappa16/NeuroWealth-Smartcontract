@@ -108,3 +108,7 @@ pub const TOPIC_SHARES_LOCKED: Symbol = symbol_short!("lock");
 pub const TOPIC_SHARES_UNLOCKED: Symbol = symbol_short!("unlock");
 /// Topic 0 for `EmergencyWithdrawalEvent`; topic 1 is the withdrawing user's `Address`.
 pub const TOPIC_EMERGENCY_WITHDRAWAL: Symbol = symbol_short!("em_wd");
+/// Topic for `CircuitBreakerTriggeredEvent`.
+pub const TOPIC_CIRCUIT_BREAKER_TRIGGERED: Symbol = symbol_short!("cb_trig");
+/// Topic for `CircuitBreakerResetEvent`.
+pub const TOPIC_CIRCUIT_BREAKER_RESET: Symbol = symbol_short!("cb_reset");
