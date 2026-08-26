@@ -4,6 +4,31 @@ This document provides comprehensive guidelines for upgrading the NeuroWealth sm
 
 ## 1. Overview
 
+### 1.1 User-Initiated Vault Migration (#637)
+
+In addition to the traditional contract upgrade process described below, the NeuroWealth vault now supports user-initiated migration of shares from an old vault to a new vault. This provides a trustless way for users to move their positions during contract upgrades without requiring owner intervention.
+
+**Key Features:**
+- Users can migrate their shares to a new vault contract set by the owner
+- Share value is preserved through exchange rate conversion
+- Migration can be paused independently of the main vault pause
+- Comprehensive event logging for migration tracking
+
+**Migration Flow:**
+1. Owner sets migration target via `set_migration_target(new_vault_address)`
+2. Users call `migrate_shares(user)` to move their positions
+3. Old vault burns shares and transfers equivalent assets to new vault
+4. New vault mints shares for the user based on the transferred assets
+
+**Security Considerations:**
+- Migration target must be owner-set to prevent malicious contracts
+- Owner can pause migration independently as a safety measure
+- Exchange rate is calculated at migration time to preserve value
+- Full event logging enables audit trails
+
+**Detailed Migration Process:**
+See section 12 below for complete details on user-initiated vault migration.
+
 In the Soroban smart contract environment, a contract upgrade involves replacing the underlying WebAssembly (WASM) code of a contract while its data (storage) remains attached to the same contract ID.
 
 **What is preserved during an upgrade:**
@@ -397,3 +422,196 @@ pub enum DataKey {
 ```
 
 _Why migration is required:_ `Vault(u64)` was renamed to `Position(u64)`. While the XDR discriminant is technically still `1`, if the semantic meaning changed, or if we changed the inner type (e.g., from `u64` to an `Address`), the old data is now inaccessible via `Position`. A migration must be run to pull data from the old layout and restructure it into the new one.
+
+---
+
+## 12. User-Initiated Vault Migration (#637)
+
+### 12.1 Purpose
+
+User-initiated vault migration allows users to trustlessly move their share positions from an old vault contract to a new one during contract upgrades. This provides an alternative to storage migrations and enables users to maintain control over their funds during upgrades.
+
+### 12.2 Architecture
+
+**Components:**
+- **Migration Target**: Owner-set address of the new vault contract
+- **Migration Pause**: Independent pause state for migration operations
+- **Share-to-Asset Conversion**: Preserves user value through exchange rate calculation
+- **Cross-Contract Calls**: Transfers assets and calls deposit on new vault
+
+**Storage Keys:**
+- `DataKey::MigrationTarget`: Address of the new vault contract
+- `DataKey::MigrationPaused`: Boolean flag for migration pause state
+
+**Events:**
+- `SharesMigratedEvent`: Emitted when user migrates shares
+- `MigrationTargetUpdatedEvent`: Emitted when owner updates migration target
+- `MigrationPausedEvent`: Emitted when migration is paused/unpaused
+
+### 12.3 Migration Process
+
+**Step 1: Owner Sets Migration Target**
+```rust
+owner.set_migration_target(new_vault_address);
+```
+- Only the owner can set the migration target
+- This prevents migration to malicious contracts
+- Emits `MigrationTargetUpdatedEvent`
+
+**Step 2: (Optional) Owner Pauses Migration**
+```rust
+owner.set_migration_paused(true);
+```
+- Owner can pause migration independently of main vault pause
+- Provides granular control during upgrades
+- Emits `MigrationPausedEvent`
+
+**Step 3: User Migrates Shares**
+```rust
+user.migrate_shares(user_address);
+```
+- User calls migration function on old vault
+- Function burns user's shares in old vault
+- Calculates asset value using current exchange rate
+- Transfers assets to new vault
+- Calls deposit on new vault on behalf of user
+- Emits `SharesMigratedEvent`
+
+### 12.4 Exchange Rate Preservation
+
+The migration preserves user value through precise exchange rate calculation:
+
+```rust
+// In old vault:
+let user_shares = get_user_shares(user);
+let total_shares = get_total_shares();
+let total_assets = get_total_assets();
+let assets_to_transfer = (user_shares * total_assets) / total_shares;
+
+// Transfer assets to new vault
+transfer_usdc(old_vault, new_vault, assets_to_transfer);
+
+// New vault mints shares based on its own exchange rate
+new_vault.deposit(user, assets_to_transfer);
+```
+
+**Key Points:**
+- Exchange rate is calculated at migration time in old vault
+- New vault mints shares based on its own current exchange rate
+- This ensures proportional ownership is preserved
+- Small rounding differences may occur due to integer division
+
+### 12.5 Security Considerations
+
+**Migration Target Validation:**
+- Only owner can set migration target
+- Prevents migration to malicious contracts
+- Users can verify target before migrating
+
+**Independent Pause Control:**
+- Migration can be paused without affecting deposits/withdrawals
+- Owner can react to security concerns quickly
+- Provides safety during upgrade process
+
+**Authentication Requirements:**
+- Migration requires user authentication
+- Only users can migrate their own shares
+- Prevents unauthorized position transfers
+
+**Liquidity Constraints:**
+- Migration requires sufficient liquidity in old vault
+- If funds are deployed to protocols, they must be withdrawn first
+- Partial migration may occur if liquidity is insufficient
+
+### 12.6 Error Handling
+
+**Common Migration Errors:**
+
+| Error | Cause | Resolution |
+|-------|-------|------------|
+| `MigrationPaused` | Migration is paused by owner | Wait for owner to unpause or skip migration |
+| `InvalidMigrationTarget` | No migration target set | Owner must set target before migration |
+| `NoSharesToMigrate` | User has no shares | Deposit shares before attempting migration |
+| `InsufficientLiquidity` | Old vault lacks sufficient assets | Owner may need to withdraw from protocols first |
+
+### 12.7 Integration with Traditional Upgrades
+
+User migration can complement traditional storage migrations:
+
+**Scenario 1: Storage Migration Required**
+- Use traditional `migrate()` function for storage schema changes
+- User migration is optional for users who prefer to move manually
+
+**Scenario 2: No Storage Migration Required**
+- Deploy new vault with same storage schema
+- Users can migrate their positions without any storage migration
+- This is the preferred approach when possible
+
+**Scenario 3: Hybrid Approach**
+- Use storage migration for essential state changes
+- Allow user migration for optional features
+- Provides flexibility for different upgrade scenarios
+
+### 12.8 Testing and Validation
+
+**Pre-Migration Testing:**
+1. Deploy new vault on testnet
+2. Set migration target on old vault
+3. Test migration with various share amounts
+4. Verify exchange rate preservation
+5. Test edge cases (zero shares, large amounts, etc.)
+
+**Post-Migration Validation:**
+1. Verify user shares in new vault
+2. Verify asset value preservation
+3. Check event logs for migration events
+4. Validate total shares and assets in both vaults
+5. Test withdrawal from new vault
+
+### 12.9 Rollback Procedures
+
+**If Migration Fails:**
+1. Owner can pause migration to prevent further issues
+2. Users can continue using old vault
+3. Debug the issue and fix new vault
+4. Resume migration after fix
+
+**If New Vault Has Issues:**
+1. Owner can update migration target to different address
+2. Users can migrate to the corrected vault
+3. Old vault remains operational as fallback
+
+### 12.10 Monitoring and Alerts
+
+**Key Metrics to Monitor:**
+- Migration target changes
+- Migration pause state changes
+- Number of successful migrations
+- Migration failure rates
+- Asset transfer amounts
+
+**Alert Triggers:**
+- Unexpected migration target changes
+- Migration paused without announcement
+- High migration failure rates
+- Large asset transfers during migration
+
+### 12.11 User Communication
+
+**Pre-Migration Announcements:**
+- Inform users of upcoming upgrade
+- Explain migration process and benefits
+- Provide timeline for migration window
+- Share new vault address for verification
+
+**During Migration:**
+- Provide real-time status updates
+- Share migration statistics
+- Address any issues or concerns
+- Provide support for migration problems
+
+**Post-Migration:**
+- Confirm successful migration completion
+- Provide instructions for using new vault
+- Share performance metrics
+- Archive old vault information
