@@ -11,25 +11,51 @@
 
 body {
   font-family: var(--font-outfit);
-  background-color: #080b11;
-  color: #f8fafc;
   min-height: 100vh;
   overflow-x: hidden;
 }
 
+.dark body,
+body {
+  background-color: #080b11;
+  color: #f8fafc;
+}
+
+@media (prefers-color-scheme: light) {
+  body:not(.dark *) {
+    background-color: #ffffff;
+    color: #0f172a;
+  }
+}
+
+.dark body {
+  background-color: #080b11;
+  color: #f8fafc;
+}
+
 .glass-panel {
-  background: rgba(18, 24, 36, 0.7);
+  background: rgba(248, 250, 252, 0.8);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+}
+
+.dark .glass-panel {
+  background: rgba(18, 24, 36, 0.7);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .glass-panel-interactive {
-  background: rgba(18, 24, 36, 0.7);
+  background: rgba(248, 250, 252, 0.8);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.08);
   transition: all 0.25s ease-in-out;
+}
+
+.dark .glass-panel-interactive {
+  background: rgba(18, 24, 36, 0.7);
+  border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
 .glass-panel-interactive:hover {
@@ -43,12 +69,18 @@ body {
   width: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #080b11;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #1e293b;
+  background: #cbd5e1;
   border-radius: 3px;
 }
+.dark ::-webkit-scrollbar-thumb {
+  background: #1e293b;
+}
 ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
   background: #334155;
 }
