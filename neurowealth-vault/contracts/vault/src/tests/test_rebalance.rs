@@ -824,6 +824,7 @@ fn test_rebalance_exit_failure_leaves_protocol_unchanged() {
     let deposit_amount = 10_000_000_i128;
     mint_and_deposit(&env, &client, &usdc_token, &user, deposit_amount);
 
+    // Deploy to blend
     client.rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
     assert_eq!(client.get_current_protocol(), symbol_short!("blend"));
 
@@ -861,18 +862,7 @@ fn test_rebalance_exit_failure_leaves_protocol_unchanged() {
 //
 // Companion to the `set_blend_pool`/`set_dex_pool` fund-stranding issue.
 // Neither setter currently guards against rotating the configured pool
-// address while a nonzero position is still deployed to the *old* pool:
-// every internal lookup (`get_protocol_balance`, `withdraw_from_blend`,
-// `withdraw_from_dex`) reads the pool address from storage *at call time*,
-// so once the address is rotated the vault permanently loses any way to see
-// or reach funds sitting in the old pool contract.
-//
-// Pre-fix, these tests document the stranding: the rotation succeeds
-// silently, and a subsequent `rebalance("none")` "succeeds" without
-// recovering any funds because the vault only ever queries the new (empty)
-// pool. Once a guard lands that rejects rotation while a position is
-// deployed, flip these assertions to expect the rotation call itself to
-// panic instead.
+// address while a nonzero position is still deployed to the *old* pool.
 
 #[test]
 fn test_blend_pool_rotation_while_deployed_strands_funds() {

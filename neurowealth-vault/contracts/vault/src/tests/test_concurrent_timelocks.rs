@@ -5,11 +5,11 @@
 //! use independent two-step timelocks on separate storage keys.
 
 use super::utils::*;
-use soroban_sdk::{testutils::Address as _, Address, Env};
+use soroban_sdk::{testutils::Address as _, testutils::Ledger as _, Address, Env};
 
 /// Helper to create a fake WASM hash for testing.
 fn fake_wasm_hash(env: &Env, seed: u8) -> soroban_sdk::BytesN<32> {
-    let mut hash = [seed; 32];
+    let hash = [seed; 32];
     soroban_sdk::BytesN::from_array(env, &hash)
 }
 
@@ -93,7 +93,7 @@ fn test_cancel_agent_update_upgrade_remains() {
     assert!(client.get_pending_agent_update().is_some());
 
     // Cancel agent update
-    client.cancel_agent_update(&owner);
+    client.cancel_agent_update();
     assert!(client.get_pending_agent_update().is_none(), "agent update should be cancelled");
 
     // Upgrade should still be pending
@@ -303,7 +303,7 @@ fn test_cancel_and_repropse_independently() {
 
     // Cancel both
     client.cancel_upgrade(&owner);
-    client.cancel_agent_update(&owner);
+    client.cancel_agent_update();
     assert!(client.get_pending_upgrade().is_none());
     assert!(client.get_pending_agent_update().is_none());
 

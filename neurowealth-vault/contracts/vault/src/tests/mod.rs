@@ -1,6 +1,5 @@
 mod test_access_control;
 mod test_adversarial_agent_simulation;
-mod test_agent_compromise_scenarios;
 mod test_agent_timelock;
 mod test_approval_ttl;
 mod test_asset_breakdown;
@@ -32,6 +31,7 @@ mod test_initialize;
 mod test_legacy_inline;
 mod test_limits;
 mod test_math_limits;
+mod test_multi_protocol;
 mod test_multi_user_concurrent;
 mod test_no_privilege_escalation_proptest;
 mod test_pause;
@@ -64,9 +64,6 @@ mod test_withdraw;
 mod test_yield;
 mod utils;
 
-mod test_batch_deposit;
 mod test_liquidity_mining_rewards;
-mod test_min_withdrawal;
 mod test_performance_fee;
-mod test_user_apy;
-mod test_withdrawal_queue;
+

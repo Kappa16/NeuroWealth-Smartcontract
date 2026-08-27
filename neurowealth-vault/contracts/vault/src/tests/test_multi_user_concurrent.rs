@@ -72,6 +72,10 @@ fn pcg(state: &mut u64) -> u64 {
 fn test_multi_user_concurrent_deposit_withdraw() {
     let env = Env::default();
     env.mock_all_auths();
+    // 100 interleaved deposit/withdraw steps with a full invariant sweep after
+    // each one far exceeds a single ledger's metering budget. This is a
+    // property/stress test, not a cost test, so lift the cap.
+    env.budget().reset_unlimited();
 
     let (contract_id, _agent, _owner, usdc_token) = setup_vault_with_token(&env);
     let client = NeuroWealthVaultClient::new(&env, &contract_id);
