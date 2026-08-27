@@ -6,6 +6,8 @@ import healthRouter, { configureHealthChecks } from './health';
 import logger from './logger';
 import { initializeTracing } from './tracing';
 
+import { ipRateLimiter, userRateLimiter } from './rateLimiter';
+
 // Initialize OpenTelemetry tracing
 initializeTracing();
 
@@ -13,6 +15,8 @@ const app = express();
 const PORT = parseInt(process.env.PORT || '3001', 10);
 
 app.use(express.json());
+app.use(ipRateLimiter);
+app.use(userRateLimiter);
 app.use(healthRouter);
 
 let decisionInterval: ReturnType<typeof setInterval> | null = null;

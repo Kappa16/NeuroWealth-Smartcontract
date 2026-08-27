@@ -1,7 +1,8 @@
 import express from 'express';
 import { Pool } from 'pg';
 import { SorobanRpc } from '@stellar/stellar-sdk';
-import logger from './logger';
+import { getPoolMetrics } from './db';
+import { openAiKeyManager } from './openAiKeyManager';
 
 const router = express.Router();
 let dbPool: Pool | null = null;
@@ -39,12 +40,29 @@ router.get('/health', async (_req, res) => {
     checks.stellar_rpc = 'error';
   }
 
+  // OpenAI keys check
+  const keyHealth = openAiKeyManager.getHealthStatus();
+  const healthyKeysCount = keyHealth.filter((k) => k.isHealthy).length;
+  if (keyHealth.length > 0) {
+    checks.openai_api_keys = healthyKeysCount > 0 ? 'ok' : 'degraded';
+  } else {
+    checks.openai_api_keys = 'not_configured';
+  }
+
   const isHealthy = Object.values(checks).every((s) => s === 'ok' || s === 'not_configured');
   const status = isHealthy ? 200 : 503;
 
   res.status(status).json({
     status: isHealthy ? 'ok' : 'degraded',
     checks,
+    metrics: {
+      dbPool: getPoolMetrics(),
+      openAiKeys: {
+        totalConfigured: openAiKeyManager.keyCount,
+        healthyCount: healthyKeysCount,
+        keys: keyHealth,
+      },
+    },
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });

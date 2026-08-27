@@ -7,7 +7,7 @@ import { trace } from '@opentelemetry/api';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { Resource } from '@opentelemetry/resources';
 import { SemanticResourceAttributes } from '@opentelemetry/semantic-conventions';
-import { JaegerExporter } from '@opentelemetry/exporter-trace-jaeger';
+import { JaegerExporter } from '@opentelemetry/exporter-jaeger';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
 import { PgInstrumentation } from '@opentelemetry/instrumentation-pg';
 import { registerInstrumentations } from '@opentelemetry/instrumentation';
