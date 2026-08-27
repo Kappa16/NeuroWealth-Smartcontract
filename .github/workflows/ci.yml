@@ -44,6 +44,9 @@ jobs:
           - name: "Vault UI Accessibility & Notifications"
             step: "vault-ui-test"
             working_directory: "packages/vault-ui"
+          - name: "Frontend Lint"
+            step: "frontend-lint"
+            working_directory: "frontend"
           - name: "Build WASM"
             step: "build-wasm"
             working_directory: "neurowealth-vault"
@@ -130,6 +133,10 @@ jobs:
             vault-ui-test)
               npm install
               npm run test
+              ;;
+            frontend-lint)
+              npm ci
+              npm run lint
               ;;
             build-wasm)
               RUSTFLAGS="-C target-cpu=mvp" cargo build \

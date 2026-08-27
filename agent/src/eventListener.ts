@@ -1,16 +1,14 @@
 import { SorobanRpc } from '@stellar/stellar-sdk';
-import { Pool } from 'pg';
+import { pool } from './db';
 import { evaluateYield } from './yieldComparison';
 import { processEventForAlerts } from './alertEngine';
 import logger from './logger';
 import { withRetry } from './retry';
 
+export { pool };
+
 const rpcUrl = process.env.SOROBAN_RPC_URL || 'https://soroban-testnet.stellar.org';
 export const server = new SorobanRpc.Server(rpcUrl);
-
-export const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-});
 
 const VAULT_CONTRACT_ID = process.env.VAULT_CONTRACT_ID || '';
 
