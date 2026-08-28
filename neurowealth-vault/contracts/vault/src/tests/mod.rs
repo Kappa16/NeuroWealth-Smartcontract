@@ -51,6 +51,7 @@ mod test_stale_state_audit;
 mod test_storage_griefing_analysis;
 mod test_strategy_switch_low_liquidity;
 mod test_total_assets_cap;
+mod test_transfer_delta_sanity;
 mod test_ttl;
 mod test_tvl_cap_serial;
 mod test_tvl_cap_stress;
