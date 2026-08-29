@@ -824,9 +824,7 @@ fn test_rebalance_exit_failure_leaves_protocol_unchanged() {
     let deposit_amount = 10_000_000_i128;
     mint_and_deposit(&env, &client, &usdc_token, &user, deposit_amount);
 
-    // Deploy to blend
     client.rebalance(&symbol_short!("blend"), &500_i128, &0_i128);
-
     assert_eq!(client.get_current_protocol(), symbol_short!("blend"));
 
     // Limit pool withdrawals so exit is incomplete (only 1M of 10M returns)

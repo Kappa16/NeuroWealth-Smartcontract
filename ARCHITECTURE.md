@@ -168,6 +168,15 @@ pub enum DataKey {
     PendingUpgradeHash,   // WASM hash awaiting timelock execution (#316)
     UpgradeTimelockExpiry,// ledger the pending upgrade unlocks at (#316)
     Deployer,             // deployer address (init only)
+    MinWithdrawal,        // minimum withdrawal amount (#638)
+    MaxQueueSize,         // maximum withdrawal queue size (#639)
+    QueueTtl,             // withdrawal request TTL in seconds (#639)
+    QueueHead,            // withdrawal queue head pointer (#639)
+    QueueTail,            // withdrawal queue tail pointer (#639)
+    WithdrawalRequest(u64),// withdrawal request entry (#639)
+    MaxBatchSize,         // maximum batch deposit size (#641)
+    UserDepositTimestamp(Address),// user deposit timestamp (#642)
+    UserDepositedValue(Address),  // user accumulated deposited value (#642)
 }
 ```
 

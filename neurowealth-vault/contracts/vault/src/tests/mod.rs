@@ -1,5 +1,6 @@
 mod test_access_control;
 mod test_adversarial_agent_simulation;
+mod test_agent_compromise_scenarios;
 mod test_agent_timelock;
 mod test_approval_ttl;
 mod test_asset_breakdown;
@@ -53,6 +54,7 @@ mod test_stale_state_audit;
 mod test_storage_griefing_analysis;
 mod test_strategy_switch_low_liquidity;
 mod test_total_assets_cap;
+mod test_transfer_delta_sanity;
 mod test_ttl;
 mod test_tvl_cap_serial;
 mod test_tvl_cap_stress;
@@ -66,7 +68,9 @@ mod test_withdraw;
 mod test_yield;
 mod utils;
 
-// Pre-existing compile failures (wrong utils path / unfinished stubs).
-// mod test_liquidity_mining_rewards;
-// mod test_performance_fee;
-
+mod test_batch_deposit;
+mod test_liquidity_mining_rewards;
+mod test_min_withdrawal;
+mod test_performance_fee;
+mod test_user_apy;
+mod test_withdrawal_queue;
