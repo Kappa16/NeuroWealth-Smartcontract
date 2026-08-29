@@ -121,3 +121,8 @@ pub const TOPIC_MULTI_PROTOCOL_MODE: Symbol = symbol_short!("multi_md");
 /// Topic for `ProtocolApyUpdatedEvent`, published when the agent reports a
 /// per-protocol APY used in the composite yield calculation.
 pub const TOPIC_PROTOCOL_APY_UPDATED: Symbol = symbol_short!("apy_upd");
+
+/// Topic for `MaxConsecutiveFailuresUpdatedEvent`, published by
+/// `set_max_consecutive_failures` when the circuit-breaker threshold changes.
+pub const TOPIC_MAX_FAILURES_UPDATED: Symbol = symbol_short!("maxf_upd");
+

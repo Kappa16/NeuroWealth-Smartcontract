@@ -229,6 +229,9 @@ See [`scripts/README-E2E.md`](scripts/README-E2E.md) for end-to-end devnet valid
 | [`docs/FORMAL_VERIFICATION.md`](docs/FORMAL_VERIFICATION.md) | Kani proofs and share-accounting properties (Issue #672) |
 | [`docs/ACCESSIBILITY.md`](docs/ACCESSIBILITY.md) | WCAG 2.1 AA statement, axe-core CI, and screen-reader checklist (Issue #668) |
 | [`docs/NOTIFICATIONS.md`](docs/NOTIFICATIONS.md) | Web Push, email fallback, and notification preferences (Issue #669) |
+| [`docs/ERC4626_CONFORMANCE_CHECKLIST.md`](docs/ERC4626_CONFORMANCE_CHECKLIST.md) | ERC-4626 conformance checklist: function-by-function diff against the spec (Issue #602) |
+| [`docs/ISSUER_FREEZE_CONTINGENCY.md`](docs/ISSUER_FREEZE_CONTINGENCY.md) | Operational plan if the vault's USDC or agent wallet is frozen by the issuer (Issue #604) |
+| [`docs/SECRETS_HYGIENE.md`](docs/SECRETS_HYGIENE.md) | Full-history secret scan results and pre-commit/CI enforcement (Issue #605) |
 
 ## Smart Contract
 The core Soroban vault contract handles all on-chain fund management.
