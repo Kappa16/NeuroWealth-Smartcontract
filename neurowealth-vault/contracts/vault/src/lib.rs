@@ -322,6 +322,24 @@ impl VaultError {
     pub const TotalAvailableOverflow: Self = Self::InvalidStrategy;
     pub const VersionOverflow: Self = Self::InvalidStrategy;
     pub const InvalidWasmHash: Self = Self::InvalidStrategy;
+    // The SDK caps `#[contracterror]` at 50 cases. Extra names stay as
+    // associated constants (same pattern as `InvalidWasmHash`) so call sites
+    // compile without growing the on-chain error enum past the spec limit.
+    pub const DeployerCannotBeZeroAddress: Self = Self::UnauthorizedDeployer;
+    pub const OwnerCannotBeZeroAddress: Self = Self::CallerIsNotOwner;
+    pub const AgentCannotBeZeroAddress: Self = Self::UnauthorizedDeployer;
+    pub const UsdcTokenCannotBeZeroAddress: Self = Self::UnauthorizedDeployer;
+    pub const MaximumDepositExceedsCeiling: Self = Self::MaximumDepositExceeded;
+    pub const MigrationPaused: Self = Self::Paused;
+    pub const InvalidMigrationTarget: Self = Self::InvalidStrategy;
+    pub const NoSharesToMigrate: Self = Self::NoSharesToWithdraw;
+    pub const SharesAlreadyLocked: Self = Self::InvalidStrategy;
+    pub const LockPeriodNotEnded: Self = Self::InvalidStrategy;
+    pub const InvalidLockDuration: Self = Self::InvalidStrategy;
+    pub const InsufficientUnlockedShares: Self = Self::InsufficientShares;
+    pub const EmergencyWithdrawalNotAllowed: Self = Self::NotPaused;
+    pub const HoldingPeriodNotElapsed: Self = Self::InvalidStrategy;
+    pub const InvalidHoldingPeriod: Self = Self::InvalidStrategy;
 }
 
 // ============================================================================
@@ -1396,8 +1414,9 @@ use topics::{
     TOPIC_AGENT_UPDATE_PROPOSED, TOPIC_APPROVAL_TTL_UPDATED, TOPIC_ASSETS_UPDATED,
     TOPIC_BLEND_POOL_CONFIGURED, TOPIC_BLEND_SUPPLY, TOPIC_BLEND_WITHDRAW, TOPIC_CAPS_UPDATED,
     TOPIC_DEPOSIT, TOPIC_DEPOSIT_LIMITS_UPDATED, TOPIC_DEX_POOL_CONFIGURED, TOPIC_DEX_SUPPLY,
-    TOPIC_DEX_WITHDRAW, TOPIC_EMERGENCY_HARVEST, TOPIC_EMERGENCY_PAUSED, TOPIC_HARVEST, TOPIC_INIT,
-    TOPIC_LIMITS_UPDATED, TOPIC_OWNERSHIP_CANCELLED, TOPIC_OWNERSHIP_INITIATED,
+    TOPIC_DEX_WITHDRAW, TOPIC_EMERGENCY_HARVEST, TOPIC_EMERGENCY_PAUSED, TOPIC_EMERGENCY_WITHDRAWAL,
+    TOPIC_HARVEST, TOPIC_INIT, TOPIC_LIMITS_UPDATED, TOPIC_MIGRATE, TOPIC_MIGRATION_PAUSED,
+    TOPIC_MIGRATION_TARGET_UPDATED, TOPIC_OWNERSHIP_CANCELLED, TOPIC_OWNERSHIP_INITIATED,
     TOPIC_OWNERSHIP_TRANSFERRED, TOPIC_PAUSED, TOPIC_PROTOCOL_CHANGED, TOPIC_REBALANCE,
     TOPIC_REBALANCE_COOLDOWN_UPDATED, TOPIC_REBALANCE_FAILED, TOPIC_TVL_CAP_UPDATED,
     TOPIC_UNPAUSED, TOPIC_UPGRADED, TOPIC_UPGRADE_CANCELLED, TOPIC_UPGRADE_SCHEDULED,
