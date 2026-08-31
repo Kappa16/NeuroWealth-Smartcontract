@@ -114,3 +114,14 @@ pub const TOPIC_CIRCUIT_BREAKER_TRIGGERED: Symbol = symbol_short!("cb_trig");
 pub const TOPIC_CIRCUIT_BREAKER_RESET: Symbol = symbol_short!("cb_reset");
 /// Topic for `InsuranceFundUpdatedEvent`.
 pub const TOPIC_INSURANCE_FUND_UPDATED: Symbol = symbol_short!("ins_fund");
+
+/// Topic for `RateLimitConfigUpdatedEvent`, published by `set_rate_limit`.
+pub const TOPIC_RATE_LIMIT_CONFIG_UPDATED: Symbol = symbol_short!("rate_cfg");
+/// Topic for `BatchSizeLimitUpdatedEvent`, published by `set_max_batch_size`.
+pub const TOPIC_BATCH_SIZE_LIMIT_UPDATED: Symbol = symbol_short!("batch_lim");
+/// Topic for `RateLimitExceededEvent`, published before a rate-limited call is rejected.
+pub const TOPIC_RATE_LIMIT_HIT: Symbol = symbol_short!("rate_hit");
+
+/// Topic for `MaxConsecutiveFailuresUpdatedEvent`, published by
+/// `set_max_consecutive_failures` when the circuit-breaker threshold changes.
+pub const TOPIC_MAX_FAILURES_UPDATED: Symbol = symbol_short!("maxf_upd");
