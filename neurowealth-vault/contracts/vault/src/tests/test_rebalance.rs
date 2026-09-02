@@ -858,6 +858,7 @@ fn test_rebalance_exit_failure_leaves_protocol_unchanged() {
     );
 }
 
+
 // ─── Issue #383: pool-address rotation while funds are deployed ─────────────
 //
 // Companion to the `set_blend_pool`/`set_dex_pool` fund-stranding issue.

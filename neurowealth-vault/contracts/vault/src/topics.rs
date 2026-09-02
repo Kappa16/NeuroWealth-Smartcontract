@@ -1,17 +1,17 @@
 //! Event topic constants for the NeuroWealth Vault contract.
-//!
-//! This module is the single source of truth for every event topic emitted
-//! by the vault. `lib.rs` imports these constants directly rather than
-//! redefining its own copies, so the on-chain symbols, this file, and
-//! `EVENTS.md` cannot drift apart. Symbols are limited to 9 characters
-//! (the `symbol_short!` limit).
-//!
-//! Most events publish a single-element topic tuple, `(TOPIC_X,)`. Three
-//! events additionally publish an indexed `Address` as topic 1 so indexers can
-//! filter per user without scanning payloads: [`TOPIC_DEPOSIT`],
-//! [`TOPIC_WITHDRAW`], and [`TOPIC_USER_STRATEGY_UPDATED`].
+//
+// This module is the single source of truth for every event topic emitted
+// by the vault. `lib.rs` imports these constants directly rather than
+// redefining its own copies, so the on-chain symbols, this file, and
+// `EVENTS.md` cannot drift apart. Symbols are limited to 9 characters
+// (the `symbol_short!` limit).
+//
+// Most events publish a single-element topic tuple, `(TOPIC_X,)`, Three
+// events additionally publish an indexed `Address` as topic 1 so indexers can
+// filter per user without scanning payloads: `TOPIC_DEPOSIT`,
+// `TOPIC_WITHDRAW`, and `TOPIC_USER_STRATEGY_UPDATED`.
 
-#![warn(missing_docs)]
+#!w[warn(missing_docs]]
 
 use soroban_sdk::{symbol_short, Symbol};
 
@@ -38,18 +38,18 @@ pub const TOPIC_TVL_CAP_UPDATED: Symbol = symbol_short!("tvl_cap");
 pub const TOPIC_USER_CAP_UPDATED: Symbol = symbol_short!("user_cap");
 /// Topic for `LimitsUpdatedEvent`, published by the deprecated `set_limits`.
 ///
-/// Prefer [`TOPIC_DEPOSIT_LIMITS_UPDATED`] for new indexers.
+/// Prefer `TOPIC_DEPOSIT_LIMITS_UPDATED` for new indexers.
 pub const TOPIC_LIMITS_UPDATED: Symbol = symbol_short!("l_upd");
 /// Topic for `DepositLimitsUpdatedEvent`, published by `set_deposit_limits`.
 pub const TOPIC_DEPOSIT_LIMITS_UPDATED: Symbol = symbol_short!("dep_lim");
 /// Topic for `CapsUpdatedEvent`, published by `set_caps`.
 pub const TOPIC_CAPS_UPDATED: Symbol = symbol_short!("caps_upd");
 /// Topic for `AgentUpdatedEvent`, published by `confirm_agent_update` alongside
-/// [`TOPIC_AGENT_UPDATE_CONFIRMED`] for legacy indexer compatibility.
+/// `TOPIC_AGENT_UPDATE_CONFIRMED` for legacy indexer compatibility.
 pub const TOPIC_AGENT_UPDATED: Symbol = symbol_short!("agent");
 /// Topic for `OwnershipTransferInitiatedEvent`, published by `transfer_ownership`.
 pub const TOPIC_OWNERSHIP_INITIATED: Symbol = symbol_short!("own_init");
-/// Topic for `OwnershipTransferredEvent`, published by `accept_ownership`.
+/// Topic for `OwnershipTransferedEvent`, published by `accept_ownership`.
 pub const TOPIC_OWNERSHIP_TRANSFERRED: Symbol = symbol_short!("own_xfer");
 /// Topic for `OwnershipTransferCancelledEvent`, published by `cancel_ownership_transfer`.
 pub const TOPIC_OWNERSHIP_CANCELLED: Symbol = symbol_short!("own_cncl");
@@ -86,7 +86,7 @@ pub const TOPIC_AGENT_UPDATE_CANCELLED: Symbol = symbol_short!("agt_cncl");
 /// Topic for `UpgradeScheduledEvent`, published by `schedule_upgrade` (timelock step 1).
 pub const TOPIC_UPGRADE_SCHEDULED: Symbol = symbol_short!("upg_sched");
 /// Topic for `UpgradeCancelledEvent`, published by `cancel_upgrade`.
-pub const TOPIC_UPGRADE_CANCELLED: Symbol = symbol_short!("upg_cncl");
+pub const TOPIC_UPMGRADE_CANCELLED: Symbol = symbol_short!("upg_cncl");
 /// Topic for `RebalanceCooldownUpdatedEvent`, published by `set_rebalance_cooldown`.
 pub const TOPIC_REBALANCE_COOLDOWN_UPDATED: Symbol = symbol_short!("reb_cd");
 /// Topic for `ApprovalTtlUpdatedEvent`, published by `set_approval_ttl`.
@@ -112,6 +112,7 @@ pub const TOPIC_EMERGENCY_WITHDRAWAL: Symbol = symbol_short!("em_wd");
 pub const TOPIC_CIRCUIT_BREAKER_TRIGGERED: Symbol = symbol_short!("cb_trig");
 /// Topic for `CircuitBreakerResetEvent`.
 pub const TOPIC_CIRCUIT_BREAKER_RESET: Symbol = symbol_short!("cb_reset");
+
 /// Topic for `ProtocolAllocationChangedEvent`, the authoritative signal that
 /// the multi-protocol allocation split changed (Phase 2 multi-protocol mode).
 pub const TOPIC_PROTOCOL_ALLOCATION_CHANGED: Symbol = symbol_short!("alloc_chg");
@@ -121,6 +122,21 @@ pub const TOPIC_MULTI_PROTOCOL_MODE: Symbol = symbol_short!("multi_md");
 /// Topic for `ProtocolApyUpdatedEvent`, published when the agent reports a
 /// per-protocol APY used in the composite yield calculation.
 pub const TOPIC_PROTOCOL_APY_UPDATED: Symbol = symbol_short!("apy_upd");
+
+/// Topic for `MaxConsecutiveFailuresUpdatedEvent`, published by
+/// `set_max_consecutive_failures` when the circuit-breaker threshold changes.
+pub const TOPIC_MAX_FAILURES_UPDATED: Symbol = symbol_short!("maxf_upd");
+
+
+/// Topic for `InsuranceFundUpdatedEvent`.
+pub const TOPIC_INSURANCE_FUND_UPDATED: Symbol = symbol_short!("ins_fund");
+
+/// Topic for `RateLimitConfigUpdatedEvent`, published by `set_rate_limit`.
+pub const TOPIC_RATE_LIMIT_CONFIG_UPDATED: Symbol = symbol_short!("rate_cfg");
+/// Topic for `BatchSizeLimitUpdatedEvent`, published by `set_max_batch_size`.
+pub const TOPIC_BATCH_SIZE_LIMIT_UPDATED: Symbol = symbol_short!("batch_lim");
+/// Topic for `RateLimitExceededEvent`, published before a rate-limited call is rejected.
+pub const TOPIC_RATE_LIMIT_HIT: Symbol = symbol_short!("rate_hit");
 
 /// Topic for `MaxConsecutiveFailuresUpdatedEvent`, published by
 /// `set_max_consecutive_failures` when the circuit-breaker threshold changes.
